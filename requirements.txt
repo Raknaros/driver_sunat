@@ -1,0 +1,8 @@
+selenium
+pandas
+python-dotenv
+apscheduler
+click
+webdriver-manager
+psycopg2-binary
+cryptography

@@ -1,0 +1,26 @@
+# -*- coding: utf-8 -*-
+"""
+Ignore Python specific files
+"""
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environment
+.venv/
+virtualenv/
+env/
+
+# Ignore data files
+data/
+*.db
+*.sqlite3
+
+# Ignore configuration files with secrets
+.env
+config.ini
+
+# Ignore IDE specific files
+.idea/
+.vscode/

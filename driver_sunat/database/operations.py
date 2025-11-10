@@ -1,0 +1,183 @@
+# -*- coding: utf-8 -*-
+import sqlite3
+import psycopg2
+import os
+from ..config import config
+from ..security import encrypt_password, decrypt_password
+
+# --- Operaciones con la BD Local (SQLite) ---
+
+def get_local_db_connection():
+    """Crea y devuelve una conexión a la base de datos local SQLite."""
+    os.makedirs(os.path.dirname(config.DATABASE_PATH), exist_ok=True)
+    conn = sqlite3.connect(config.DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def initialize_local_db():
+    """Inicializa la base de datos local, creando las tablas si no existen."""
+    print("Inicializando la base de datos local (SQLite)...")
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS contribuyentes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ruc TEXT NOT NULL UNIQUE,
+        user_sol TEXT NOT NULL,
+        password_sol_encrypted BLOB NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT 1
+    );
+    """)
+    print("Tabla 'contribuyentes' lista.")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS buzon_mensajes (
+        id INTEGER PRIMARY KEY,
+        ruc TEXT NOT NULL,
+        asunto TEXT,
+        fecha_publicacion TEXT,
+        leido BOOLEAN DEFAULT 0,
+        fecha_revision TEXT
+    );
+    """)
+    print("Tabla 'buzon_mensajes' lista.")
+
+    conn.commit()
+    conn.close()
+
+def get_active_contribuyentes():
+    """Obtiene todos los contribuyentes activos de la BD local SQLite y descifra sus claves."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT ruc, user_sol, password_sol_encrypted FROM contribuyentes WHERE is_active = 1")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    key = config.ENCRYPTION_KEY.encode('utf-8')
+    contribuyentes = []
+    for row in rows:
+        try:
+            decrypted_pass = decrypt_password(row['password_sol_encrypted'], key)
+            contribuyentes.append({
+                "ruc": row['ruc'],
+                "user_sol": row['user_sol'],
+                "password_sol": decrypted_pass
+            })
+        except Exception as e:
+            print(f"ADVERTENCIA: No se pudo descifrar la contraseña para el RUC {row['ruc']}. Error: {e}")
+    return contribuyentes
+
+# --- Funciones para el Buzón ---
+
+def get_messages_by_ruc_as_dict(ruc: str):
+    """Devuelve los mensajes de un RUC como un diccionario para búsqueda rápida."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, leido FROM buzon_mensajes WHERE ruc = ?", (ruc,))
+    return {row['id']: {'leido': bool(row['leido'])} for row in cursor.fetchall()}
+
+def add_message(msg_data: dict):
+    """Añade un nuevo mensaje a la base de datos local."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO buzon_mensajes (id, ruc, asunto, fecha_publicacion, leido, fecha_revision)
+    VALUES (:id, :ruc, :asunto, :fecha_publicacion, :leido, :fecha_revision)
+    """, msg_data)
+    conn.commit()
+    conn.close()
+
+def update_message_status(msg_id: int, leido: bool, fecha_revision: str):
+    """Actualiza el estado 'leido' de un mensaje existente."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE buzon_mensajes SET leido = ?, fecha_revision = ? WHERE id = ?", (leido, fecha_revision, msg_id))
+    conn.commit()
+    conn.close()
+
+# --- Operaciones con la BD Central (PostgreSQL) ---
+
+def get_central_db_connection():
+    """Crea y devuelve una conexión a la base de datos central PostgreSQL."""
+    try:
+        conn = psycopg2.connect(
+            host=config.PG_HOST,
+            port=config.PG_PORT,
+            dbname=config.PG_DBNAME,
+            user=config.PG_USER,
+            password=config.PG_PASSWORD
+        )
+        return conn
+    except psycopg2.OperationalError as e:
+        print(f"ERROR: No se pudo conectar a la base de datos PostgreSQL. Revisa las credenciales en .env. Detalle: {e}")
+        return None
+
+def sync_clients_from_central_db():
+    """Sincroniza los clientes desde PostgreSQL a la base de datos local SQLite."""
+    print("Iniciando sincronización de clientes desde la BD Central...")
+    pg_conn = get_central_db_connection()
+    if not pg_conn:
+        print("Sincronización fallida.")
+        return
+
+    # !!! IMPORTANTE: Ajusta esta consulta a tu esquema de BD real. !!!
+    query = "SELECT ruc, usuario_sol, clave_sol, activo FROM priv.entities WHERE activo = TRUE"
+    
+    try:
+        pg_cursor = pg_conn.cursor()
+        pg_cursor.execute(query)
+        clients = pg_cursor.fetchall()
+    except Exception as e:
+        print(f"ERROR: Falló la consulta a la base de datos central. Revisa la consulta y los nombres de tablas/columnas. Detalle: {e}")
+        pg_conn.close()
+        return
+    finally:
+        pg_conn.close()
+
+    print(f"Se encontraron {len(clients)} clientes activos en la BD Central. Sincronizando...")
+    local_conn = get_local_db_connection()
+    local_cursor = local_conn.cursor()
+    key = config.ENCRYPTION_KEY.encode('utf-8')
+
+    for client in clients:
+        ruc, user_sol, plain_password, is_active = client
+        if not plain_password:
+            print(f"ADVERTENCIA: Se omite el RUC {ruc} porque no tiene contraseña definida en la BD Central.")
+            continue
+            
+        encrypted_pass = encrypt_password(plain_password, key)
+        
+        local_cursor.execute("""
+        INSERT INTO contribuyentes (ruc, user_sol, password_sol_encrypted, is_active)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(ruc) DO UPDATE SET
+            user_sol = excluded.user_sol,
+            password_sol_encrypted = excluded.password_sol_encrypted,
+            is_active = excluded.is_active;
+        """, (str(ruc), user_sol, encrypted_pass, is_active))
+
+    local_conn.commit()
+    local_conn.close()
+    print("Sincronización completada.")
+
+def update_central_db_observacion(ruc: str, observacion: str):
+    """Añade una observación a un cliente en la BD Central PostgreSQL."""
+    print(f"Registrando observación para el RUC {ruc} en la BD Central...")
+    pg_conn = get_central_db_connection()
+    if not pg_conn:
+        return
+
+    # !!! IMPORTANTE: Ajusta esta consulta a tu esquema de BD real. !!!
+    query = "UPDATE priv.entities SET observaciones = %s WHERE ruc = %s"
+    
+    try:
+        pg_cursor = pg_conn.cursor()
+        pg_cursor.execute(query, (observacion, str(ruc)))
+        pg_conn.commit()
+        print("Observación registrada correctamente.")
+    except Exception as e:
+        print(f"ERROR al actualizar la BD Central: {e}")
+        pg_conn.rollback()
+    finally:
+        pg_conn.close()
