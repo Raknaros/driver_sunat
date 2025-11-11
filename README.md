@@ -91,6 +91,12 @@ El proyecto incluye varios comandos CLI accesibles a través de `python main.py`
    python main.py tasks check-mailbox
    ```
 
+3. **Test de captura de buzón (imprimir en consola)**:
+   ```bash
+   python test_buzon.py
+   ```
+   Esto ejecuta un test que captura los mensajes del buzón e imprime en consola el formato exacto que se usaría para subir a la base de datos, sin guardar nada.
+
 3. **Ejecutar scraping básico** (desde `scrapingavanzado.txt`):
    ```python
    from scrapingavanzado import SunatScraper
