@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from driver_sunat.cli import cli
+from driver_sunat.config import setup_logging
 
 if __name__ == "__main__":
     """
@@ -8,4 +9,5 @@ if __name__ == "__main__":
     Llama al objeto `cli` de Click, que se encarga de parsear los argumentos
     de la línea de comandos y ejecutar el comando correspondiente.
     """
+    setup_logging()
     cli()

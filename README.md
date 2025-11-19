@@ -84,14 +84,43 @@ El proyecto incluye varios comandos CLI accesibles a través de `python main.py`
    ```bash
    python main.py scheduler
    ```
-   Esto ejecutará tareas programadas como sincronización de clientes (1:00 AM) y revisión de buzones (8:00 AM).
+   Esto ejecutará tareas programadas:
+   - Sincronización de clientes (1:00 AM diaria)
+   - Revisión de buzones (8:00 AM diaria)
+   - Descarga de facturas (día 1 del mes, 2:00 AM)
+   - Solicitud de reportes T-Registro (día 1 del mes, 3:00 AM)
+   - Descarga de reportes listos (9:00 AM diaria)
 
 2. **Revisar buzones manualmente**:
    ```bash
    python main.py tasks check-mailbox
+   # Para todos los contribuyentes activos
+
+   python main.py tasks check-mailbox --ruc 20606283858
+   # Para un RUC específico
    ```
 
-3. **Test de captura de buzón (imprimir en consola)**:
+3. **Descargar facturas manualmente**:
+   ```bash
+   python main.py tasks download-invoices --ruc 20606283858 --start-date 01/10/2025 --end-date 31/10/2025
+   ```
+
+4. **Solicitar reportes T-Registro**:
+   ```bash
+   python main.py tasks request-report --ruc 20606283858 --tipo-reporte 6
+   # Tipo 6: Reporte de prestadores de servicios (default)
+   ```
+
+5. **Descargar reportes listos**:
+   ```bash
+   python main.py tasks download-reports --ruc 20606283858
+   # Para un RUC específico
+
+   python main.py tasks download-reports
+   # Para todos los RUC activos
+   ```
+
+4. **Test de captura de buzón (imprimir en consola)**:
    ```bash
    python test_buzon.py
    ```
@@ -111,30 +140,70 @@ El scheduler ejecuta automáticamente:
 - **Sincronización de clientes**: Todos los días a las 1:00 AM.
 - **Revisión de buzones**: Todos los días a las 8:00 AM para todos los contribuyentes activos.
 
+## Arquitectura del Sistema
+
+```mermaid
+graph TD
+    A[CLI / Scheduler] --> B[BaseTask]
+    B --> C[Login/Logout con Reintentos]
+    B --> D[Task Específica]
+
+    D --> E[CheckMailboxTask]
+    D --> F[DownloadInvoicesTask]
+
+    E --> G[Sincronizar Mensajes con BD]
+    F --> H[Descargar y Verificar Archivos]
+
+    B --> I[Database Operations]
+    I --> J[BD Local SQLite]
+    I --> K[BD Central PostgreSQL]
+
+    B --> L[Logging System]
+    B --> M[Error Handling & Recovery]
+
+    A --> N[Config System]
+    N --> O[Horarios Programados]
+    N --> P[Credenciales Cifradas]
+
+    S[Scheduler Jobs] --> T[Sincronización Diaria 1:00 AM]
+    S --> U[Revisión Buzón Diaria 8:00 AM]
+    S --> V[Descarga Facturas Mensual Día 1, 2:00 AM]
+    S --> W[Solicitud Reportes T-Registro Día 1, 3:00 AM]
+    S --> X[Descarga Reportes Diaria 9:00 AM]
+```
+
 ## Estructura del Proyecto
 
 ```
 driver_sunat/
-├── main.py                          # Punto de entrada principal
+├── main.py                          # Punto de entrada principal con setup de logging
 ├── requirements.txt                 # Dependencias del proyecto
 ├── scrapingavanzado.txt             # Código de ejemplo para scraping básico
+├── test_buzon.py                    # Script de test para captura de buzón
 ├── driver_sunat/                    # Módulo principal
 │   ├── __init__.py
-│   ├── cli.py                       # Definición de comandos CLI
-│   ├── config.py                    # Configuración y variables de entorno
-│   ├── scheduler.py                 # Programador de tareas con APScheduler
+│   ├── cli.py                       # Definición de comandos CLI con opciones --ruc
+│   ├── config.py                    # Configuración centralizada con SCHEDULE_CONFIG y LOG_CONFIG
+│   ├── scheduler.py                 # Programador de tareas mejorado con logging
 │   ├── security.py                  # Funciones de cifrado/descifrado
 │   ├── automation/                  # Módulos de automatización
 │   │   ├── __init__.py
 │   │   ├── driver_manager.py        # Configuración de Selenium WebDriver
 │   │   └── tasks/                   # Tareas específicas
 │   │       ├── __init__.py
-│       │   ├── base_task.py         # Clase base para tareas
-│       │   ├── check_mailbox.py     # Tarea de revisión de buzón
-│       │   └── download_invoices.py # Tarea de descarga de facturas (en desarrollo)
+│       │   ├── base_task.py         # Clase base con login/logout y reintentos
+│       │   ├── check_mailbox.py     # Tarea de revisión de buzón con logging
+│       │   ├── download_invoices.py # Tarea completa de descarga de facturas
+│       │   ├── request_report.py    # Tarea de solicitud de reportes T-Registro
+│       │   └── download_report.py   # Tarea de descarga de reportes listos
 │   └── database/                    # Operaciones de base de datos
 │       ├── __init__.py
 │       └── operations.py            # Funciones para BD local y central
+├── logs/                            # Directorio de logs (creado automáticamente)
+│   └── driver_sunat.log
+├── data/                            # Directorio de datos (creado automáticamente)
+│   ├── sunat_data.db                # Base de datos local SQLite
+│   └── downloads/                   # Archivos descargados
 └── tests/                           # Directorio de pruebas
     └── __init__.py
 ```

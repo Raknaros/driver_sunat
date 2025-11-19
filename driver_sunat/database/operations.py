@@ -43,6 +43,19 @@ def initialize_local_db():
     """)
     print("Tabla 'buzon_mensajes' lista.")
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS reportes_tregistro (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ruc TEXT NOT NULL,
+        tipo_reporte TEXT NOT NULL,
+        ticket TEXT,
+        estado TEXT DEFAULT 'SOLICITADO',
+        fecha_solicitud TEXT,
+        fecha_descarga TEXT
+    );
+    """)
+    print("Tabla 'reportes_tregistro' lista.")
+
     conn.commit()
     conn.close()
 
@@ -93,6 +106,53 @@ def update_message_status(msg_id: int, leido: bool, fecha_revision: str):
     conn = get_local_db_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE buzon_mensajes SET leido = ?, fecha_revision = ? WHERE id = ?", (leido, fecha_revision, msg_id))
+    conn.commit()
+    conn.close()
+
+# --- Funciones para Reportes T-Registro ---
+
+def add_report_request(report_data: dict):
+    """Añade una nueva solicitud de reporte a la base de datos local."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO reportes_tregistro (ruc, tipo_reporte, ticket, estado, fecha_solicitud)
+    VALUES (:ruc, :tipo_reporte, :ticket, :estado, :fecha_solicitud)
+    """, report_data)
+    report_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return report_id
+
+def get_pending_reports(ruc=None):
+    """Obtiene reportes pendientes de descarga."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    if ruc:
+        cursor.execute("SELECT * FROM reportes_tregistro WHERE ruc = ? AND estado = 'SOLICITADO'", (ruc,))
+    else:
+        cursor.execute("SELECT * FROM reportes_tregistro WHERE estado = 'SOLICITADO'")
+    reports = cursor.fetchall()
+    conn.close()
+    return reports
+
+def update_report_status(report_id: int, estado: str, fecha_descarga=None):
+    """Actualiza el estado de un reporte."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    if fecha_descarga:
+        cursor.execute("UPDATE reportes_tregistro SET estado = ?, fecha_descarga = ? WHERE id = ?",
+                      (estado, fecha_descarga, report_id))
+    else:
+        cursor.execute("UPDATE reportes_tregistro SET estado = ? WHERE id = ?", (estado, report_id))
+    conn.commit()
+    conn.close()
+
+def update_report_ticket(report_id: int, ticket: str):
+    """Actualiza el ticket de un reporte."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE reportes_tregistro SET ticket = ? WHERE id = ?", (ticket, report_id))
     conn.commit()
     conn.close()
 
