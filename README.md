@@ -126,6 +126,12 @@ El proyecto incluye varios comandos CLI accesibles a través de `python main.py`
    ```
    Esto ejecuta un test que captura los mensajes del buzón e imprime en consola el formato exacto que se usaría para subir a la base de datos, sin guardar nada.
 
+5. **Test de solicitud de reportes**:
+   ```bash
+   python test_request_report.py
+   ```
+   Solicita un reporte T-Registro e imprime el ID del reporte y ticket generado para verificar que el flujo funciona correctamente.
+
 3. **Ejecutar scraping básico** (desde `scrapingavanzado.txt`):
    ```python
    from scrapingavanzado import SunatScraper
@@ -180,6 +186,7 @@ driver_sunat/
 ├── requirements.txt                 # Dependencias del proyecto
 ├── scrapingavanzado.txt             # Código de ejemplo para scraping básico
 ├── test_buzon.py                    # Script de test para captura de buzón
+├── test_request_report.py           # Script de test para solicitud de reportes
 ├── driver_sunat/                    # Módulo principal
 │   ├── __init__.py
 │   ├── cli.py                       # Definición de comandos CLI con opciones --ruc
