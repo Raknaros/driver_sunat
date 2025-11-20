@@ -85,6 +85,19 @@ class RequestReportTask(BaseTask):
             # Cambiar al iframe
             wait.until(EC.frame_to_be_available_and_switch_to_it((By.NAME, "iframeApplication")))
 
+            # Verificar si hay mensaje de error (contribuyente no registrado como empleador)
+            try:
+                error_div = self.driver.find_element(By.CSS_SELECTOR, "div.msg")
+                error_msg = self.driver.find_element(By.CSS_SELECTOR, "p.error").text
+                if "El contribuyente no ha sido registrado como Empleador" in error_msg:
+                    # Registrar observación
+                    db.add_observation(ruc, f"Error al solicitar reporte: {error_msg}", "PENDIENTE")
+                    self.logger.warning(f"Contribuyente {ruc} no registrado como empleador. Observación registrada.")
+                    raise Exception(f"Contribuyente no registrado como empleador: {error_msg}")
+            except NoSuchElementException:
+                # No hay error, continuar
+                pass
+
             # Click en DESCARGA DE INFORMACION DE PRESTADOR DE SERVICIOS
             descarga_link = wait.until(EC.element_to_be_clickable((By.ID, "adescarga")))
             descarga_link.click()
@@ -123,9 +136,14 @@ class RequestReportTask(BaseTask):
             aceptar_btn.click()
             time.sleep(3)
 
+            # Re-switch al iframe por si se recargó
+            self.driver.switch_to.default_content()
+            wait.until(EC.frame_to_be_available_and_switch_to_it((By.NAME, "iframeApplication")))
+
             # SEGUNDO: Analizar tabla después de la solicitud para encontrar el nuevo ticket
             tickets_despues = self._analyze_existing_reports()
             nuevo_ticket = self._find_new_ticket(tickets_antes, tickets_despues)
+            self.logger.info(f"Tickets antes: {tickets_antes}, después: {tickets_despues}, nuevo: {nuevo_ticket}")
 
             if nuevo_ticket:
                 self.logger.info(f"Nuevo ticket generado: {nuevo_ticket}")
@@ -140,11 +158,8 @@ class RequestReportTask(BaseTask):
                 }
 
                 report_id = db.add_report_request(report_data)
-                if report_id:
-                    self.logger.info(f"Reporte solicitado registrado en BD con ID {report_id}, Ticket {nuevo_ticket}")
-                    return report_id
-                else:
-                    self.logger.error("Error registrando reporte en BD")
+                self.logger.info(f"Reporte solicitado registrado en BD con ID {report_id}, Ticket {nuevo_ticket}")
+                return report_id
             else:
                 self.logger.warning("No se pudo identificar el ticket generado")
                 # Registrar sin ticket por ahora
@@ -156,6 +171,7 @@ class RequestReportTask(BaseTask):
                     'fecha_solicitud': datetime.now().isoformat()
                 }
                 report_id = db.add_report_request(report_data)
+                self.logger.info(f"Reporte solicitado registrado en BD con ID {report_id}, sin ticket")
                 return report_id
 
         except Exception as e:
@@ -179,7 +195,8 @@ class RequestReportTask(BaseTask):
                 celdas = fila.find_elements(By.TAG_NAME, "td")
                 if len(celdas) >= 1:  # Al menos la columna de ticket
                     ticket = celdas[0].text.strip()
-                    if ticket:
+                    # Filtrar solo tickets válidos (numéricos, excluyendo mensajes como "El prestador no ha solicitado descargas.")
+                    if ticket and ticket.isdigit():
                         tickets.append(ticket)
 
             self.logger.debug(f"Analizados {len(tickets)} tickets existentes")

@@ -56,6 +56,17 @@ def initialize_local_db():
     """)
     print("Tabla 'reportes_tregistro' lista.")
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS observaciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ruc TEXT NOT NULL,
+        mensaje TEXT NOT NULL,
+        estado TEXT DEFAULT 'PENDIENTE',
+        timestamp TEXT NOT NULL
+    );
+    """)
+    print("Tabla 'observaciones' lista.")
+
     conn.commit()
     conn.close()
 
@@ -119,8 +130,10 @@ def add_report_request(report_data: dict):
     INSERT INTO reportes_tregistro (ruc, tipo_reporte, ticket, estado, fecha_solicitud)
     VALUES (:ruc, :tipo_reporte, :ticket, :estado, :fecha_solicitud)
     """, report_data)
-    report_id = cursor.lastrowid
-    conn.commit()
+    cursor.execute("SELECT id FROM reportes_tregistro ORDER BY id DESC LIMIT 1")
+    result = cursor.fetchone()
+    report_id = result[0] if result else 0
+    cursor.close()
     conn.close()
     return report_id
 
@@ -221,6 +234,19 @@ def sync_clients_from_central_db():
     local_conn.close()
     print("Sincronización completada.")
 
+def add_observation(ruc: str, mensaje: str, estado: str = "PENDIENTE"):
+    """Añade una nueva observación a la base de datos local."""
+    from datetime import datetime
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    timestamp = datetime.now().isoformat()
+    cursor.execute("""
+    INSERT INTO observaciones (ruc, mensaje, estado, timestamp)
+    VALUES (?, ?, ?, ?)
+    """, (ruc, mensaje, estado, timestamp))
+    conn.commit()
+    conn.close()
+
 def update_central_db_observacion(ruc: str, observacion: str):
     """Añade una observación a un cliente en la BD Central PostgreSQL."""
     print(f"Registrando observación para el RUC {ruc} en la BD Central...")
@@ -230,7 +256,7 @@ def update_central_db_observacion(ruc: str, observacion: str):
 
     # !!! IMPORTANTE: Ajusta esta consulta a tu esquema de BD real. !!!
     query = "UPDATE priv.entities SET observaciones = %s WHERE ruc = %s"
-    
+
     try:
         pg_cursor = pg_conn.cursor()
         pg_cursor.execute(query, (observacion, str(ruc)))

@@ -9,9 +9,9 @@ from driver_sunat.automation.tasks.request_report import RequestReportTask
 if __name__ == '__main__':
     # Credenciales de ejemplo (reemplaza con las tuyas)
     CONTRIBUYENTE = {
-        'ruc': '20606283858',
-        'user_sol': 'TONERTAT',
-        'password_sol': 'rcavinsio'
+        'ruc': '20611822201',
+        'user_sol': 'LATOOTAL',
+        'password_sol': 'actroushe'
     }
 
     # Tipo de reporte a solicitar (6 = Prestadores de servicios)
@@ -21,7 +21,8 @@ if __name__ == '__main__':
     try:
         task = RequestReportTask(driver)
         report_id = task.run(CONTRIBUYENTE, TIPO_REPORTE)
-
+        print(f"DEBUG: report_id = {report_id}, type = {type(report_id)}")
+    
         if report_id:
             print(f"\n=== SOLICITUD DE REPORTE EXITOSA ===")
             print(f"ID de reporte en BD: {report_id}")

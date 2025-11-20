@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 import click
-from .scheduler import start_scheduler, job_check_mailbox, job_download_invoices_for_ruc
-from .database.operations import initialize_db, get_active_contribuyentes
+from .scheduler import start_scheduler, job_check_all_mailboxes, job_download_invoices_for_ruc, \
+    job_check_mailbox_for_ruc
+from .database.operations import initialize_local_db, get_active_contribuyentes
 from .automation.driver_manager import get_webdriver
 from .automation.tasks.check_mailbox import CheckMailboxTask
 from .automation.tasks.download_invoices import DownloadInvoicesTask
@@ -28,7 +29,7 @@ def scheduler():
 def init_db():
     """(Re)Inicializa la base de datos y crea las tablas."""
     click.echo(click.style("Inicializando la base de datos...", fg="yellow"))
-    initialize_db()
+    initialize_local_db()
     click.echo(click.style("Base de datos lista.", fg="green"))
 
 # --- Comandos para Tareas Manuales ---
@@ -47,7 +48,7 @@ def check_mailbox(ruc):
         job_check_mailbox_for_ruc(ruc)
     else:
         click.echo(click.style("Ejecutando revisión de buzón para todos los contribuyentes activos...", fg="blue"))
-        job_check_mailbox()
+        job_check_all_mailboxes()
     click.echo(click.style("Tarea de revisión de buzón finalizada.", fg="green"))
 
 @tasks.command()
