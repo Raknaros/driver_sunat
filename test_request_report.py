@@ -9,9 +9,9 @@ from driver_sunat.automation.tasks.request_report import RequestReportTask
 if __name__ == '__main__':
     # Credenciales de ejemplo (reemplaza con las tuyas)
     CONTRIBUYENTE = {
-        'ruc': '20611822201',
-        'user_sol': 'LATOOTAL',
-        'password_sol': 'actroushe'
+        'ruc': '10726501306',
+        'user_sol': 'USANKYUL',
+        'password_sol': 'liroalort'
     }
 
     # Tipo de reporte a solicitar (6 = Prestadores de servicios)

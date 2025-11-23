@@ -133,6 +133,7 @@ def add_report_request(report_data: dict):
     cursor.execute("SELECT id FROM reportes_tregistro ORDER BY id DESC LIMIT 1")
     result = cursor.fetchone()
     report_id = result[0] if result else 0
+    conn.commit()
     cursor.close()
     conn.close()
     return report_id

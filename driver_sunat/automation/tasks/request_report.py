@@ -33,18 +33,20 @@ class RequestReportTask(BaseTask):
             login_success = self.login(contribuyente)
             if not login_success:
                 self.logger.error("Login falló, cancelando solicitud de reporte")
-                return
+                return None
 
             # Navegar al menú de reportes
             self._navigate_to_reports_section()
 
             # Solicitar el reporte
-            self._request_report(tipo_reporte, contribuyente['ruc'])
+            report_id = self._request_report(tipo_reporte, contribuyente['ruc'])
 
             # Logout
             self.logout()
 
             self.logger.info(f"Solicitud de reporte tipo {tipo_reporte} completada para RUC {contribuyente['ruc']}")
+
+            return report_id
 
         except Exception as e:
             self.logger.error(f"Error solicitando reporte para RUC {contribuyente['ruc']}: {e}")
