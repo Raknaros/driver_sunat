@@ -286,18 +286,24 @@ def add_observation(ruc: str, mensaje: str, estado: str = "PENDIENTE"):
     conn.close()
 
 def update_central_db_observacion(ruc: str, observacion: str):
-    """Añade una observación a un cliente en la BD Central PostgreSQL."""
+    """Añade una observación a un cliente en la BD Central PostgreSQL, concatenando con el texto existente."""
     print(f"Registrando observación para el RUC {ruc} en la BD Central...")
     pg_conn = get_central_db_connection()
     if not pg_conn:
         return
 
-    # !!! IMPORTANTE: Ajusta esta consulta a tu esquema de BD real. !!!
-    query = "UPDATE priv.entities SET observaciones = %s WHERE ruc = %s"
-
     try:
         pg_cursor = pg_conn.cursor()
-        pg_cursor.execute(query, (observacion, str(ruc)))
+        # Query current observaciones
+        pg_cursor.execute("SELECT observaciones FROM priv.entities WHERE ruc = %s", (str(ruc),))
+        row = pg_cursor.fetchone()
+        current = row[0] if row and row[0] else ""
+        # Concatenate
+        new_observacion = f"{current}|{observacion}" if current else observacion
+
+        # Update
+        query = "UPDATE priv.entities SET observaciones = %s WHERE ruc = %s"
+        pg_cursor.execute(query, (new_observacion, str(ruc)))
         pg_conn.commit()
         print("Observación registrada correctamente.")
     except Exception as e:

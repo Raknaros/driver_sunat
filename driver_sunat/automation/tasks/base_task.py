@@ -26,6 +26,7 @@ class BaseTask:
         Lanza una excepción si el login falla después de todos los reintentos.
         """
         self.logger.info(f"Iniciando proceso de login para RUC: {contribuyente['ruc']}")
+        auth_failed = False
 
         for attempt in range(max_retries):
             try:
@@ -65,6 +66,25 @@ class BaseTask:
                 self.driver.find_element(By.ID, "txtUsuario").send_keys(contribuyente['user_sol'])
                 self.driver.find_element(By.ID, "txtContrasena").send_keys(contribuyente['password_sol'])
                 self.driver.find_element(By.ID, "btnAceptar").click()
+
+                # Verificar si hay error de autenticación
+                time.sleep(3)
+                try:
+                    error_header = self.driver.find_element(By.ID, "lblHeader")
+                    if "Falla en la autenticación" in error_header.text:
+                        self.logger.warning("Detectada falla de autenticación")
+                        if not auth_failed:
+                            from ...database.operations import add_observation
+                            add_observation(contribuyente['ruc'], "Falla en la autenticación", "PENDIENTE")
+                            auth_failed = True
+                        # Click en "Intentar nuevamente" para volver al formulario
+                        btn_volver = self.driver.find_element(By.ID, "btnVolver")
+                        btn_volver.click()
+                        time.sleep(1)
+                        # No retry para auth failure, salir del loop
+                        break
+                except NoSuchElementException:
+                    pass  # No hay error, continuar
 
                 # 3. Manejo de diálogos post-login
                 wait = WebDriverWait(self.driver, 10)
