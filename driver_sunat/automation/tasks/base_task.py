@@ -37,7 +37,7 @@ class BaseTask:
                 self.driver.maximize_window()
                 self.driver.implicitly_wait(2)
 
-                self.driver.find_element(By.XPATH, "/html/body/section[1]/div/div/section[2]/div[2]/div/a/span").click()
+                self.driver.find_element(By.CSS_SELECTOR, "a[href='javascript:tramiteConsulta()']").click()
 
                 time.sleep(2)  # Espera para que aparezcan las ventanas emergentes
 
@@ -51,6 +51,8 @@ class BaseTask:
 
                 # 2. Ingreso de credenciales y manejo de diálogos (lógica de login_tramites_consultas)
                 time.sleep(1)
+                wait = WebDriverWait(self.driver, 10)
+                wait.until(EC.presence_of_element_located((By.ID, "txtRuc")))
                 self.driver.find_element(By.ID, "txtRuc").send_keys(contribuyente['ruc'])
                 self.driver.find_element(By.ID, "txtUsuario").send_keys(contribuyente['user_sol'])
                 self.driver.find_element(By.ID, "txtContrasena").send_keys(contribuyente['password_sol'])
@@ -101,6 +103,8 @@ class BaseTask:
             self.logger.info("Cerrando sesión...")
             self.driver.switch_to.default_content()
             self.driver.find_element(By.ID, "btnSalir").click()
+            # Reset to main page for next login
+            self.driver.get(self.config.SUNAT_PORTAL_URL)
             self.logger.info("Logout exitoso.")
         except Exception as e:
             self.logger.warning(f"No se pudo hacer logout. La sesión podría haber expirado: {e}")

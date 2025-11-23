@@ -9,12 +9,18 @@ class SireClient:
     Maneja autenticación, tokens y requests con reintentos.
     """
 
-    def __init__(self, logger):
+    def __init__(self, logger, ruc):
         self.logger = logger
+        self.ruc = ruc
         self.token = None
         self.token_expires_at = None
-        self.client_id = config.SIRE_CLIENT_ID
-        self.client_secret = config.SIRE_CLIENT_SECRET
+        # Obtener credenciales de BD
+        creds = db.get_sire_credentials(ruc)
+        if not creds:
+            raise ValueError(f"No se encontraron credenciales SIRE válidas para RUC {ruc}")
+        self.client_id = creds['client_id']
+        self.client_secret = creds['client_secret']
+        self.user_sol = creds['user_sol']
 
     def _get_token(self, ruc, sol_user, sol_pass):
         """

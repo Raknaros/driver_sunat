@@ -8,9 +8,9 @@ class SireRequestTask:
     Tarea para solicitar reportes SIRE (Ventas/Compras) via API.
     """
 
-    def __init__(self, logger):
+    def __init__(self, logger, ruc):
         self.logger = logger
-        self.client = SireClient(logger)
+        self.client = SireClient(logger, ruc)
 
     def run(self, contribuyente: dict, tipo: str, periodo: str):
         """

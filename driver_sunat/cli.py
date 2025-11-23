@@ -2,7 +2,7 @@
 import click
 from .scheduler import start_scheduler, job_check_all_mailboxes, job_download_invoices_for_ruc, \
     job_check_mailbox_for_ruc
-from .database.operations import initialize_local_db, get_active_contribuyentes
+from .database.operations import initialize_local_db, get_active_contribuyentes, sync_clients_from_central_db
 from .automation.driver_manager import get_webdriver
 from .automation.tasks.check_mailbox import CheckMailboxTask
 from .automation.tasks.download_invoices import DownloadInvoicesTask
@@ -180,7 +180,7 @@ def sire_request(ruc, tipo, periodo):
     import logging
     logger = logging.getLogger(__name__)
     try:
-        task = SireRequestTask(logger)
+        task = SireRequestTask(logger, ruc)
         sire_id = task.run(contribuyente, tipo, periodo)
         if sire_id:
             click.echo(click.style(f"Solicitud SIRE completada exitosamente (ID: {sire_id})", fg="green"))
@@ -207,7 +207,7 @@ def sire_download(ruc, sire_id):
     import logging
     logger = logging.getLogger(__name__)
     try:
-        task = SireDownloadTask(logger)
+        task = SireDownloadTask(logger, ruc)
         task.run(contribuyente, sire_id)
         click.echo(click.style("Descarga SIRE completada", fg="green"))
     except Exception as e:

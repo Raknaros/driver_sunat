@@ -9,9 +9,9 @@ class SireStatusTask:
     Tarea para consultar el estado de reportes SIRE pendientes.
     """
 
-    def __init__(self, logger):
+    def __init__(self, logger, ruc):
         self.logger = logger
-        self.client = SireClient(logger)
+        self.client = SireClient(logger, ruc)
 
     def run(self, contribuyente: dict, ticket: str, tipo: str, periodo: str):
         """

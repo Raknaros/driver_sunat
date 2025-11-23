@@ -8,9 +8,9 @@ class SireDownloadTask:
     Tarea para descargar reportes SIRE listos.
     """
 
-    def __init__(self, logger):
+    def __init__(self, logger, ruc):
         self.logger = logger
-        self.client = SireClient(logger)
+        self.client = SireClient(logger, ruc)
 
     def run(self, contribuyente: dict, sire_id: int):
         """

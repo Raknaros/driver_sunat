@@ -443,3 +443,23 @@ def get_otras_credenciales(ruc=None, tipo=None):
     creds = cursor.fetchall()
     conn.close()
     return creds
+
+def get_sire_credentials(ruc: str):
+    """Obtiene credenciales SIRE para un RUC (tipo APISUNAT con SIRE en credencial3)."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT oc.usuario, oc.contrasena, c.user_sol
+    FROM otras_credenciales oc
+    JOIN contribuyentes c ON oc.ruc = c.ruc
+    WHERE oc.ruc = ? AND oc.tipo = 'APISUNAT' AND oc.credencial3 LIKE '%SIRE%'
+    """, (ruc,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            'client_id': row[0],
+            'client_secret': row[1],
+            'user_sol': row[2]
+        }
+    return None

@@ -23,8 +23,7 @@ class Config:
     PG_PASSWORD = os.getenv("PG_PASSWORD")
 
     # --- Configuración de API SIRE ---
-    SIRE_CLIENT_ID = os.getenv("SUNAT_CLIENT_ID")
-    SIRE_CLIENT_SECRET = os.getenv("SUNAT_CLIENT_SECRET")
+    # Credenciales obtenidas de BD local (otras_credenciales)
 
     # --- Rutas de Archivos Locales ---
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

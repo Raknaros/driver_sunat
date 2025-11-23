@@ -25,7 +25,7 @@ def job_check_all_mailboxes():
         return
 
     logger.info(f"Se procesarán {len(contribuyentes)} contribuyentes.")
-    driver = get_webdriver(headless=True)
+    driver = get_webdriver(headless=False)
     try:
         task = CheckMailboxTask(driver)
         for client in contribuyentes:
@@ -249,7 +249,7 @@ def job_sire_reports():
     for tipo in tipos:
         for contribuyente in contribuyentes:
             try:
-                task = SireRequestTask(logger)
+                task = SireRequestTask(logger, contribuyente['ruc'])
                 sire_id = task.run(contribuyente, tipo, periodo)
                 if sire_id:
                     sire_ids.append((sire_id, tipo, periodo, contribuyente))
@@ -264,10 +264,10 @@ def job_sire_reports():
         all_ready = True
         for sire_id, tipo, periodo, contribuyente in sire_ids:
             try:
-                status_task = SireStatusTask(logger)
+                status_task = SireStatusTask(logger, contribuyente['ruc'])
                 estado = status_task.run(contribuyente, db.get_pending_sire_reports(ruc=contribuyente['ruc'], tipo=tipo)[0]['ticket'], tipo, periodo)
                 if estado == 'LISTO':
-                    download_task = SireDownloadTask(logger)
+                    download_task = SireDownloadTask(logger, contribuyente['ruc'])
                     download_task.run(contribuyente, sire_id)
                 elif estado != 'PROCESANDO':
                     all_ready = False
