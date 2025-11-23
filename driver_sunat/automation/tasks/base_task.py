@@ -31,23 +31,31 @@ class BaseTask:
             try:
                 self.logger.debug(f"Intento {attempt + 1} de login para RUC {contribuyente['ruc']}")
 
-                # 1. Navegación y manejo de Popups (lógica de tramites_consultas)
-                main_window = self.driver.current_window_handle
-                self.driver.get(self.config.SUNAT_PORTAL_URL)
-                self.driver.maximize_window()
-                self.driver.implicitly_wait(2)
+                # Verificar si ya estamos en la ventana de login
+                try:
+                    wait = WebDriverWait(self.driver, 5)
+                    wait.until(EC.presence_of_element_located((By.ID, "txtRuc")))
+                    # Ya en login, proceder directamente
+                    self.logger.debug("Ya en ventana de login, rellenando formulario")
+                except TimeoutException:
+                    # No en login, hacer navegación completa
+                    self.logger.debug("No en ventana de login, navegando")
+                    main_window = self.driver.current_window_handle
+                    self.driver.get(self.config.SUNAT_PORTAL_URL)
+                    self.driver.maximize_window()
+                    self.driver.implicitly_wait(2)
 
-                self.driver.find_element(By.CSS_SELECTOR, "a[href='javascript:tramiteConsulta()']").click()
+                    self.driver.find_element(By.CSS_SELECTOR, "a[href='javascript:tramiteConsulta()']").click()
 
-                time.sleep(2)  # Espera para que aparezcan las ventanas emergentes
+                    time.sleep(2)  # Espera para que aparezcan las ventanas emergentes
 
-                all_windows = self.driver.window_handles
-                if len(all_windows) > 1:
-                    for window in all_windows:
-                        if window != main_window:
-                            self.driver.switch_to.window(window)
-                            break
-                self.driver.maximize_window()
+                    all_windows = self.driver.window_handles
+                    if len(all_windows) > 1:
+                        for window in all_windows:
+                            if window != main_window:
+                                self.driver.switch_to.window(window)
+                                break
+                    self.driver.maximize_window()
 
                 # 2. Ingreso de credenciales y manejo de diálogos (lógica de login_tramites_consultas)
                 time.sleep(1)
@@ -103,8 +111,6 @@ class BaseTask:
             self.logger.info("Cerrando sesión...")
             self.driver.switch_to.default_content()
             self.driver.find_element(By.ID, "btnSalir").click()
-            # Reset to main page for next login
-            self.driver.get(self.config.SUNAT_PORTAL_URL)
             self.logger.info("Logout exitoso.")
         except Exception as e:
             self.logger.warning(f"No se pudo hacer logout. La sesión podría haber expirado: {e}")
