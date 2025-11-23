@@ -22,6 +22,10 @@ class Config:
     PG_USER = os.getenv("PG_USER")
     PG_PASSWORD = os.getenv("PG_PASSWORD")
 
+    # --- Configuración de API SIRE ---
+    SIRE_CLIENT_ID = os.getenv("SUNAT_CLIENT_ID")
+    SIRE_CLIENT_SECRET = os.getenv("SUNAT_CLIENT_SECRET")
+
     # --- Rutas de Archivos Locales ---
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     DATABASE_PATH = os.path.join(BASE_DIR, "data", "sunat_data.db")
@@ -39,6 +43,7 @@ class Config:
         'download_invoices': {'day': 1, 'hour': 2, 'minute': 0},  # Mensual día 1, 2:00 AM
         'request_reports': {'day': 1, 'hour': 3, 'minute': 0},  # Mensual día 1, 3:00 AM
         'download_reports': {'hour': 9, 'minute': 0},  # Diario 9:00 AM
+        'sire_reports': {'day': 9, 'hour': 9, 'minute': 0},  # Mensual día 9, 9:00 AM
     }
 
     # --- Configuración de Logging ---

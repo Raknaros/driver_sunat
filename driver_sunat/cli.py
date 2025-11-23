@@ -8,6 +8,9 @@ from .automation.tasks.check_mailbox import CheckMailboxTask
 from .automation.tasks.download_invoices import DownloadInvoicesTask
 from .automation.tasks.request_report import RequestReportTask
 from .automation.tasks.download_report import DownloadReportTask
+from .automation.sire.sire_request_task import SireRequestTask
+from .automation.sire.sire_status_task import SireStatusTask
+from .automation.sire.sire_download_task import SireDownloadTask
 
 @click.group()
 def cli():
@@ -31,6 +34,20 @@ def init_db():
     click.echo(click.style("Inicializando la base de datos...", fg="yellow"))
     initialize_local_db()
     click.echo(click.style("Base de datos lista.", fg="green"))
+
+@cli.command()
+def sync_otras_credenciales():
+    """Sincroniza otras_credenciales desde la base de datos central."""
+    click.echo(click.style("Sincronizando otras_credenciales...", fg="yellow"))
+    sync_otras_credenciales_from_central_db()
+    click.echo(click.style("Sincronización completada.", fg="green"))
+
+@cli.command()
+def sync_contribuyentes():
+    """Sincroniza contribuyentes desde la base de datos central."""
+    click.echo(click.style("Sincronizando contribuyentes...", fg="yellow"))
+    sync_clients_from_central_db()
+    click.echo(click.style("Sincronización completada.", fg="green"))
 
 # --- Comandos para Tareas Manuales ---
 
@@ -143,6 +160,58 @@ def download_reports(ruc):
             finally:
                 driver.quit()
         click.echo(click.style("Descarga de reportes completada para todos", fg="green"))
+
+@tasks.command()
+@click.option('--ruc', required=True, help='RUC del contribuyente')
+@click.option('--tipo', required=True, type=click.Choice(['ventas', 'compras']), help='Tipo de reporte SIRE')
+@click.option('--periodo', required=True, help='Período tributario (ej. 202509)')
+def sire_request(ruc, tipo, periodo):
+    """Solicita un reporte SIRE (Ventas/Compras) para un RUC específico."""
+    click.echo(click.style(f"Solicitando reporte SIRE {tipo} para RUC {ruc}, período {periodo}", fg="blue"))
+
+    # Obtener datos del contribuyente
+    contribuyentes = get_active_contribuyentes()
+    contribuyente = next((c for c in contribuyentes if c['ruc'] == ruc), None)
+
+    if not contribuyente:
+        click.echo(click.style(f"Error: RUC {ruc} no encontrado o no activo", fg="red"))
+        return
+
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        task = SireRequestTask(logger)
+        sire_id = task.run(contribuyente, tipo, periodo)
+        if sire_id:
+            click.echo(click.style(f"Solicitud SIRE completada exitosamente (ID: {sire_id})", fg="green"))
+        else:
+            click.echo(click.style("Solicitud completada pero no se pudo registrar", fg="yellow"))
+    except Exception as e:
+        click.echo(click.style(f"Error en solicitud SIRE: {e}", fg="red"))
+
+@tasks.command()
+@click.option('--ruc', required=True, help='RUC del contribuyente')
+@click.option('--sire-id', required=True, type=int, help='ID del reporte SIRE en BD')
+def sire_download(ruc, sire_id):
+    """Descarga un reporte SIRE listo."""
+    click.echo(click.style(f"Descargando reporte SIRE ID {sire_id} para RUC {ruc}", fg="blue"))
+
+    # Obtener datos del contribuyente
+    contribuyentes = get_active_contribuyentes()
+    contribuyente = next((c for c in contribuyentes if c['ruc'] == ruc), None)
+
+    if not contribuyente:
+        click.echo(click.style(f"Error: RUC {ruc} no encontrado o no activo", fg="red"))
+        return
+
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        task = SireDownloadTask(logger)
+        task.run(contribuyente, sire_id)
+        click.echo(click.style("Descarga SIRE completada", fg="green"))
+    except Exception as e:
+        click.echo(click.style(f"Error en descarga SIRE: {e}", fg="red"))
 
 # Añadir el grupo de tareas al CLI principal
 cli.add_command(tasks)
