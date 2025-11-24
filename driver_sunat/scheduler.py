@@ -33,6 +33,10 @@ def job_check_all_mailboxes():
             logger.debug(f"Procesado contribuyente {client['ruc']}")
     finally:
         driver.quit()
+
+    # Sync determinantes observations to central DB
+    db.sync_determinant_observations_to_central()
+
     logger.info("JOB PROGRAMADO FINALIZADO: Revisión de buzones")
 
 def job_check_mailbox_for_ruc(ruc: str):

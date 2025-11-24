@@ -5,7 +5,7 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 from ..config import config
 
-def get_webdriver(headless: bool = False):
+def get_webdriver(headless: bool = True):
     """
     Configura y devuelve una instancia de Chrome WebDriver.
 

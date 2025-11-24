@@ -7,7 +7,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from ...config import config
-from ...database.operations import update_central_db_observacion
+from ...database.operations import update_central_db_observacion, get_local_db_connection
+
 
 class BaseTask:
     """
@@ -74,8 +75,8 @@ class BaseTask:
                     if "Falla en la autenticación" in error_header.text:
                         self.logger.warning("Detectada falla de autenticación")
                         if not auth_failed:
-                            from ...database.operations import add_observation
-                            add_observation(contribuyente['ruc'], "Falla en la autenticación", "PENDIENTE")
+                            from ...database.operations import add_observation, get_local_db_connection
+                            add_observation(contribuyente['ruc'], "Falla en la autenticación", "DETERMINANTE", "PENDIENTE")
                             auth_failed = True
                         # Click en "Intentar nuevamente" para volver al formulario
                         btn_volver = self.driver.find_element(By.ID, "btnVolver")

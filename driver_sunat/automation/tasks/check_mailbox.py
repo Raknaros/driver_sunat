@@ -12,7 +12,7 @@ def parse_leido(value) -> bool:
     """Convierte el valor de 'leido' de string a booleano."""
     if value is None:
         return False
-    return str(value).lower() == 'true'
+    return str(value) == '1'
 
 class CheckMailboxTask(BaseTask):
     """
@@ -39,8 +39,11 @@ class CheckMailboxTask(BaseTask):
             # Lógica de sincronización de mensajes
             self._sync_messages(contribuyente['ruc'])
 
-            # Si todo fue bien, actualizamos la observación en la BD Central
-            db.update_central_db_observacion(contribuyente['ruc'], "Buzon Revisado")
+            # Agregar observación local de éxito
+            db.add_observation(contribuyente['ruc'], "Buzon Revisado", "LOCAL", "PENDIENTE")
+
+            # Sync buzon to central
+            db.sync_buzon_to_central(contribuyente['ruc'])
 
             self.logout()
 

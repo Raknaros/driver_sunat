@@ -61,11 +61,24 @@ def initialize_local_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ruc TEXT NOT NULL,
         mensaje TEXT NOT NULL,
-        estado TEXT DEFAULT 'PENDIENTE',
+        tipo TEXT DEFAULT 'LOCAL',  -- 'LOCAL' o 'DETERMINANTE'
+        estado TEXT DEFAULT 'PENDIENTE',  -- 'PENDIENTE' o 'SINCRONIZADO'
         timestamp TEXT NOT NULL
     );
     """)
     print("Tabla 'observaciones' lista.")
+
+    # Add columns if not exist
+    try:
+        cursor.execute("ALTER TABLE observaciones ADD COLUMN tipo TEXT DEFAULT 'LOCAL'")
+        print("Columna 'tipo' agregada a 'observaciones'.")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE observaciones ADD COLUMN estado TEXT DEFAULT 'PENDIENTE'")
+        print("Columna 'estado' agregada a 'observaciones'.")
+    except sqlite3.OperationalError:
+        pass
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS sire_reportes (
@@ -251,14 +264,16 @@ def sync_clients_from_central_db():
     local_cursor = local_conn.cursor()
     key = config.ENCRYPTION_KEY.encode('utf-8')
 
+    active_rucs = []
     for client in clients:
         ruc, user_sol, plain_password, is_active = client
+        active_rucs.append(str(ruc))
         if not plain_password:
             print(f"ADVERTENCIA: Se omite el RUC {ruc} porque no tiene contraseña definida en la BD Central.")
             continue
-            
+
         encrypted_pass = encrypt_password(plain_password, key)
-        
+
         local_cursor.execute("""
         INSERT INTO contribuyentes (ruc, user_sol, password_sol_encrypted, is_active)
         VALUES (?, ?, ?, ?)
@@ -268,20 +283,25 @@ def sync_clients_from_central_db():
             is_active = excluded.is_active;
         """, (str(ruc), user_sol, encrypted_pass, is_active))
 
+    # Desactivar clientes no presentes en la lista activa
+    if active_rucs:
+        placeholders = ','.join('?' for _ in active_rucs)
+        local_cursor.execute(f"UPDATE contribuyentes SET is_active = 0 WHERE ruc NOT IN ({placeholders})", active_rucs)
+
     local_conn.commit()
     local_conn.close()
     print("Sincronización completada.")
 
-def add_observation(ruc: str, mensaje: str, estado: str = "PENDIENTE"):
+def add_observation(ruc: str, mensaje: str, tipo: str = "LOCAL", estado: str = "PENDIENTE"):
     """Añade una nueva observación a la base de datos local."""
     from datetime import datetime
     conn = get_local_db_connection()
     cursor = conn.cursor()
     timestamp = datetime.now().isoformat()
     cursor.execute("""
-    INSERT INTO observaciones (ruc, mensaje, estado, timestamp)
-    VALUES (?, ?, ?, ?)
-    """, (ruc, mensaje, estado, timestamp))
+    INSERT INTO observaciones (ruc, mensaje, tipo, estado, timestamp)
+    VALUES (?, ?, ?, ?, ?)
+    """, (ruc, mensaje, tipo, estado, timestamp))
     conn.commit()
     conn.close()
 
@@ -308,6 +328,77 @@ def update_central_db_observacion(ruc: str, observacion: str):
         print("Observación registrada correctamente.")
     except Exception as e:
         print(f"ERROR al actualizar la BD Central: {e}")
+        pg_conn.rollback()
+    finally:
+        pg_conn.close()
+
+def sync_determinant_observations_to_central():
+    """Sincroniza observaciones determinantes pendientes para todos los RUC a la BD central."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, ruc, mensaje FROM observaciones WHERE tipo = 'DETERMINANTE' AND estado = 'PENDIENTE'")
+    pending = cursor.fetchall()
+    conn.close()
+
+    if not pending:
+        return
+
+    for obs_id, ruc, mensaje in pending:
+        update_central_db_observacion(ruc, mensaje)
+        # Mark as synced
+        conn = get_local_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE observaciones SET estado = 'SINCRONIZADO' WHERE id = ?", (obs_id,))
+        conn.commit()
+        conn.close()
+
+def sync_buzon_to_central(ruc: str):
+    """Sincroniza mensajes de buzón local a la tabla central priv.buzon_sunat."""
+    from datetime import datetime
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, asunto, fecha_publicacion, leido, fecha_revision FROM buzon_mensajes WHERE ruc = ?", (ruc,))
+    local_messages = cursor.fetchall()
+    conn.close()
+
+    if not local_messages:
+        return
+
+    pg_conn = get_central_db_connection()
+    if not pg_conn:
+        return
+
+    try:
+        pg_cursor = pg_conn.cursor()
+        for msg in local_messages:
+            msg_id, asunto, fecha_publicacion_str, leido_int, fecha_revision = msg
+            leido = bool(leido_int)  # Convert to bool
+            # Parse fecha_publicacion to date
+            try:
+                fecha_recepcion = datetime.strptime(fecha_publicacion_str, "%d/%m/%Y %H:%M:%S").date()
+            except ValueError:
+                print(f"Error parsing fecha_publicacion: {fecha_publicacion_str}")
+                continue
+            # Check if exists
+            pg_cursor.execute("SELECT leido FROM priv.buzon_sunat WHERE id = %s", (msg_id,))
+            existing = pg_cursor.fetchone()
+            if existing:
+                # Update if leido changed to true
+                if not existing[0] and leido:
+                    pg_cursor.execute("""
+                        UPDATE priv.buzon_sunat
+                        SET leido = %s, fecha_revision = %s
+                        WHERE id = %s
+                    """, (leido, fecha_revision, msg_id))
+            else:
+                # Insert new
+                pg_cursor.execute("""
+                    INSERT INTO priv.buzon_sunat (id, asunto, fecha_recepcion, fecha_revision, leido, observaciones, ruc)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (msg_id, asunto, fecha_recepcion, fecha_revision, leido, '', ruc))
+        pg_conn.commit()
+    except Exception as e:
+        print(f"Error syncing buzon to central: {e}")
         pg_conn.rollback()
     finally:
         pg_conn.close()

@@ -2,7 +2,8 @@
 import click
 from .scheduler import start_scheduler, job_check_all_mailboxes, job_download_invoices_for_ruc, \
     job_check_mailbox_for_ruc
-from .database.operations import initialize_local_db, get_active_contribuyentes, sync_clients_from_central_db
+from .database.operations import initialize_local_db, get_active_contribuyentes, sync_clients_from_central_db, \
+    sync_otras_credenciales_from_central_db, sync_buzon_to_central
 from .automation.driver_manager import get_webdriver
 from .automation.tasks.check_mailbox import CheckMailboxTask
 from .automation.tasks.download_invoices import DownloadInvoicesTask
@@ -212,6 +213,17 @@ def sire_download(ruc, sire_id):
         click.echo(click.style("Descarga SIRE completada", fg="green"))
     except Exception as e:
         click.echo(click.style(f"Error en descarga SIRE: {e}", fg="red"))
+
+@tasks.command()
+@click.option('--ruc', required=True, help='RUC del contribuyente')
+def sync_buzon(ruc):
+    """Sincroniza mensajes de buzón local a la base de datos central."""
+    click.echo(click.style(f"Sincronizando buzón para RUC {ruc}...", fg="blue"))
+    try:
+        sync_buzon_to_central(ruc)
+        click.echo(click.style("Sincronización de buzón completada", fg="green"))
+    except Exception as e:
+        click.echo(click.style(f"Error en sincronización: {e}", fg="red"))
 
 # Añadir el grupo de tareas al CLI principal
 cli.add_command(tasks)
