@@ -225,5 +225,16 @@ def sync_buzon(ruc):
     except Exception as e:
         click.echo(click.style(f"Error en sincronización: {e}", fg="red"))
 
+@tasks.command()
+def sire_proposals_download():
+    """Ejecuta el flujo completo de descarga de propuestas SIRE para todos los contribuyentes activos."""
+    from .scheduler import job_sire_proposals_download
+    click.echo(click.style("Ejecutando descarga de propuestas SIRE para todos los contribuyentes activos...", fg="blue"))
+    try:
+        job_sire_proposals_download()
+        click.echo(click.style("Descarga de propuestas SIRE completada", fg="green"))
+    except Exception as e:
+        click.echo(click.style(f"Error en descarga de propuestas SIRE: {e}", fg="red"))
+
 # Añadir el grupo de tareas al CLI principal
 cli.add_command(tasks)

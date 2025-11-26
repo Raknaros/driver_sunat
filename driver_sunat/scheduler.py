@@ -10,7 +10,7 @@ from .automation.sire.sire_request_task import SireRequestTask
 from .automation.sire.sire_status_task import SireStatusTask
 from .automation.sire.sire_download_task import SireDownloadTask
 from .database import operations as db
-from .database.operations import get_active_contribuyentes, initialize_local_db, sync_clients_from_central_db
+from .database.operations import get_active_contribuyentes, get_active_contribuyentes_with_sire_creds, initialize_local_db, sync_clients_from_central_db
 from .config import config
 
 logger = logging.getLogger(__name__)
@@ -147,12 +147,12 @@ def start_scheduler():
     # Tarea 6: Procesar reportes SIRE mensuales (día 9)
     sire_config = config.SCHEDULE_CONFIG.get('sire_reports', {'day': 9, 'hour': 9, 'minute': 0})
     scheduler.add_job(
-        job_sire_reports,
+        job_sire_proposals_download,
         trigger='cron',
         day=sire_config['day'],
         hour=sire_config['hour'],
         minute=sire_config['minute'],
-        name="Procesamiento mensual de reportes SIRE"
+        name="Descarga mensual de propuestas SIRE"
     )
 
     logger.info("Scheduler iniciado. Tareas programadas:")
@@ -235,52 +235,68 @@ def job_download_reports_for_all():
 
     logger.info("JOB FINALIZADO: Descarga de reportes para todos")
 
-def job_sire_reports():
-    """Job mensual que solicita, consulta y descarga reportes SIRE para todos los contribuyentes."""
-    from datetime import datetime
-    logger.info("INICIANDO JOB MENSUAL: Procesamiento de reportes SIRE")
+def job_sire_proposals_download():
+    """Job mensual que solicita propuestas SIRE, espera, consulta status y descarga para contribuyentes con credenciales SIRE."""
+    import time
+    logger.info("INICIANDO JOB MENSUAL: Descarga de propuestas SIRE")
 
-    contribuyentes = get_active_contribuyentes()
+    contribuyentes = get_active_contribuyentes_with_sire_creds()
     if not contribuyentes:
-        logger.warning("No hay contribuyentes activos para procesar SIRE.")
+        logger.warning("No hay contribuyentes activos con credenciales SIRE válidas para procesar.")
         return
 
-    periodo = datetime.now().strftime("%Y%m")  # Mes actual
     tipos = ['ventas', 'compras']
 
-    # Solicitar reportes para todos
+    # Solicitar propuestas para todos (ventas luego compras, mes anterior automático)
     sire_ids = []
-    for tipo in tipos:
-        for contribuyente in contribuyentes:
+    for contribuyente in contribuyentes:
+        for tipo in tipos:
             try:
                 task = SireRequestTask(logger, contribuyente['ruc'])
-                sire_id = task.run(contribuyente, tipo, periodo)
+                sire_id = task.run(contribuyente, tipo)  # Periodo automático mes anterior
                 if sire_id:
-                    sire_ids.append((sire_id, tipo, periodo, contribuyente))
+                    sire_ids.append((sire_id, tipo, contribuyente))
             except Exception as e:
-                logger.error(f"Error solicitando SIRE {tipo} para RUC {contribuyente['ruc']}: {e}")
+                logger.error(f"Error solicitando propuesta SIRE {tipo} para RUC {contribuyente['ruc']}: {e}")
 
-    # Polling de status cada 5 min hasta listo o timeout
-    import time
-    max_attempts = 12  # 1 hora
+    logger.info(f"Solicitudes completadas para {len(sire_ids)} reportes SIRE. Esperando 2 minutos...")
+    time.sleep(120)  # Espera inicial de 2 min
+
+    # Polling de status cada 30 seg hasta listo o timeout (30 min = 60 intentos)
+    max_attempts = 60
     for attempt in range(max_attempts):
         logger.info(f"Consulta de status SIRE - Intento {attempt+1}/{max_attempts}")
         all_ready = True
-        for sire_id, tipo, periodo, contribuyente in sire_ids:
+        for sire_id, tipo, contribuyente in sire_ids:
             try:
+                # Obtener ticket de BD
+                reports = db.get_pending_sire_reports(ruc=contribuyente['ruc'], tipo=tipo)
+                if not reports:
+                    logger.warning(f"No se encontró reporte pendiente para RUC {contribuyente['ruc']}, tipo {tipo}")
+                    continue
+                ticket = reports[0]['ticket']
+                periodo = reports[0]['periodo']
+
                 status_task = SireStatusTask(logger, contribuyente['ruc'])
-                estado = status_task.run(contribuyente, db.get_pending_sire_reports(ruc=contribuyente['ruc'], tipo=tipo)[0]['ticket'], tipo, periodo)
+                estado = status_task.run(contribuyente, ticket, tipo, periodo)
                 if estado == 'LISTO':
                     download_task = SireDownloadTask(logger, contribuyente['ruc'])
                     download_task.run(contribuyente, sire_id)
-                elif estado != 'PROCESANDO':
+                elif estado == 'PROCESANDO':
+                    all_ready = False
+                else:
+                    logger.warning(f"Estado inesperado para SIRE ID {sire_id}: {estado}")
                     all_ready = False
             except Exception as e:
                 logger.error(f"Error procesando SIRE ID {sire_id}: {e}")
                 all_ready = False
 
         if all_ready:
+            logger.info("Todos los reportes SIRE listos y descargados.")
             break
-        time.sleep(300)  # 5 min
+        time.sleep(30)  # 30 seg
 
-    logger.info("JOB MENSUAL FINALIZADO: Procesamiento de reportes SIRE")
+    if not all_ready:
+        logger.warning("Timeout alcanzado, algunos reportes SIRE pueden no estar listos.")
+
+    logger.info("JOB MENSUAL FINALIZADO: Descarga de propuestas SIRE")

@@ -2,6 +2,7 @@
 import requests
 from datetime import datetime, timedelta
 from ...config import config
+from ...database import operations as db
 
 class SireClient:
     """
@@ -25,6 +26,7 @@ class SireClient:
     def _get_token(self, ruc, sol_user, sol_pass):
         """
         Obtiene un Bearer Token usando OAuth2 password grant, con cache en BD.
+        Registra errores de autenticación en observaciones locales.
         """
         # Primero intentar obtener de BD
         cached_token = db.get_valid_sire_token(ruc)
@@ -59,8 +61,19 @@ class SireClient:
             self.token_expires_at = datetime.now() + timedelta(hours=1)
             self.logger.info("Token de acceso SIRE obtenido y guardado")
             return self.token
+        except requests.exceptions.HTTPError as e:
+            error_msg = f"Error token SIRE HTTP {e.response.status_code}: {e.response.text}"
+            self.logger.error(error_msg)
+            # Registrar en observaciones locales
+            from ...database.operations import add_observation
+            add_observation(ruc, error_msg, "LOCAL")
+            raise
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error obteniendo token SIRE: {e}")
+            error_msg = f"Error obteniendo token SIRE: {e}"
+            self.logger.error(error_msg)
+            # Registrar en observaciones locales
+            from ...database.operations import add_observation
+            add_observation(ruc, error_msg, "LOCAL")
             raise
 
     def _make_request(self, method, url, params=None, retries=3):
@@ -92,9 +105,16 @@ class SireClient:
         Solicita una propuesta de descarga para Ventas o Compras.
         """
         token = self._get_token(ruc, sol_user, sol_pass)
-        libro = 'rvie' if tipo == 'ventas' else 'rvierce'
-        url = f"https://api-sire.sunat.gob.pe/v1/contribuyente/migeigv/libros/{libro}/propuesta/web/propuesta/{periodo}/exportapropuesta"
-        params = {'codTipoArchivo': '0'}
+        if tipo == 'ventas':
+            libro = 'rvie'
+            url = f"https://api-sire.sunat.gob.pe/v1/contribuyente/migeigv/libros/{libro}/propuesta/web/propuesta/{periodo}/exportapropuesta"
+            params = {'codTipoArchivo': '0'}
+        elif tipo == 'compras':
+            libro = 'rce'
+            url = f"https://api-sire.sunat.gob.pe/v1/contribuyente/migeigv/libros/{libro}/propuesta/web/propuesta/{periodo}/exportacioncomprobantepropuesta"
+            params = {'codTipoArchivo': '0', 'codOrigenEnvio': '2'}
+        else:
+            raise ValueError(f"Tipo no válido: {tipo}")
 
         data = self._make_request('GET', url, params)
         if data and 'numTicket' in data:

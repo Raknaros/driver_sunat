@@ -2,6 +2,7 @@
 import sqlite3
 import psycopg2
 import os
+from datetime import datetime
 from ..config import config
 from ..security import encrypt_password, decrypt_password
 
@@ -112,10 +113,18 @@ def initialize_local_db():
         tipo TEXT NOT NULL,
         usuario TEXT,
         contrasena TEXT,
-        credencial3 TEXT
+        credencial3 TEXT,
+        observaciones TEXT
     );
     """)
     print("Tabla 'otras_credenciales' lista.")
+
+    # Add columns if not exist
+    try:
+        cursor.execute("ALTER TABLE otras_credenciales ADD COLUMN observaciones TEXT")
+        print("Columna 'observaciones' agregada a 'otras_credenciales'.")
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
     conn.close()
@@ -127,7 +136,34 @@ def get_active_contribuyentes():
     cursor.execute("SELECT ruc, user_sol, password_sol_encrypted FROM contribuyentes WHERE is_active = 1")
     rows = cursor.fetchall()
     conn.close()
-    
+
+    key = config.ENCRYPTION_KEY.encode('utf-8')
+    contribuyentes = []
+    for row in rows:
+        try:
+            decrypted_pass = decrypt_password(row['password_sol_encrypted'], key)
+            contribuyentes.append({
+                "ruc": row['ruc'],
+                "user_sol": row['user_sol'],
+                "password_sol": decrypted_pass
+            })
+        except Exception as e:
+            print(f"ADVERTENCIA: No se pudo descifrar la contraseña para el RUC {row['ruc']}. Error: {e}")
+    return contribuyentes
+
+def get_active_contribuyentes_with_sire_creds():
+    """Obtiene contribuyentes activos que tienen credenciales SIRE válidas (tipo APISUNAT y credencial3 LIKE '%SIRE%')."""
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT c.ruc, c.user_sol, c.password_sol_encrypted
+    FROM contribuyentes c
+    JOIN otras_credenciales oc ON c.ruc = oc.ruc
+    WHERE c.is_active = 1 AND oc.tipo = 'APISUNAT' AND oc.observaciones LIKE '%SIRE%'
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
     key = config.ENCRYPTION_KEY.encode('utf-8')
     contribuyentes = []
     for row in rows:
@@ -294,7 +330,6 @@ def sync_clients_from_central_db():
 
 def add_observation(ruc: str, mensaje: str, tipo: str = "LOCAL", estado: str = "PENDIENTE"):
     """Añade una nueva observación a la base de datos local."""
-    from datetime import datetime
     conn = get_local_db_connection()
     cursor = conn.cursor()
     timestamp = datetime.now().isoformat()
@@ -354,7 +389,6 @@ def sync_determinant_observations_to_central():
 
 def sync_buzon_to_central(ruc: str):
     """Sincroniza mensajes de buzón local a la tabla central priv.buzon_sunat."""
-    from datetime import datetime
     conn = get_local_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, asunto, fecha_publicacion, leido, fecha_revision FROM buzon_mensajes WHERE ruc = ?", (ruc,))
@@ -497,7 +531,7 @@ def sync_otras_credenciales_from_central_db():
         print("Sincronización fallida.")
         return
 
-    query = "SELECT ruc, tipo, usuario, contrasena, credencial3 FROM priv.otras_credenciales"
+    query = "SELECT ruc, tipo, usuario, contrasena, credencial3, observaciones FROM priv.otras_credenciales"
     try:
         pg_cursor = pg_conn.cursor()
         pg_cursor.execute(query)
@@ -514,11 +548,11 @@ def sync_otras_credenciales_from_central_db():
     local_cursor = local_conn.cursor()
 
     for cred in creds:
-        ruc, tipo, usuario, contrasena, credencial3 = cred
+        ruc, tipo, usuario, contrasena, credencial3, observaciones = cred
         local_cursor.execute("""
-        INSERT OR REPLACE INTO otras_credenciales (ruc, tipo, usuario, contrasena, credencial3)
-        VALUES (?, ?, ?, ?, ?)
-        """, (str(ruc), tipo, usuario, contrasena, credencial3))
+        INSERT OR REPLACE INTO otras_credenciales (ruc, tipo, usuario, contrasena, credencial3, observaciones)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (str(ruc), tipo, usuario, contrasena, credencial3, observaciones))
 
     local_conn.commit()
     local_conn.close()
@@ -549,7 +583,7 @@ def get_sire_credentials(ruc: str):
     SELECT oc.usuario, oc.contrasena, c.user_sol
     FROM otras_credenciales oc
     JOIN contribuyentes c ON oc.ruc = c.ruc
-    WHERE oc.ruc = ? AND oc.tipo = 'APISUNAT' AND oc.credencial3 LIKE '%SIRE%'
+    WHERE oc.ruc = ? AND oc.tipo = 'APISUNAT' AND oc.observaciones LIKE '%SIRE%'
     """, (ruc,))
     row = cursor.fetchone()
     conn.close()

@@ -39,16 +39,16 @@ class SireStatusTask:
                 # Asumir que data es lista de tickets
                 for item in status_data['data']:
                     if str(item.get('numTicket')) == str(ticket):
-                        estado = item.get('desEstado', '').upper()
-                        if 'TERMINADO' in estado or 'LISTO' in estado:
-                            self.logger.info(f"Ticket {ticket} está listo para descarga")
-                            # Podría marcar como listo, pero dejar para download task
+                        cod_estado = item.get('codEstado')
+                        des_estado = item.get('desEstado', '').upper()
+                        if cod_estado == '6' or 'TERMINADO' in des_estado or 'LISTO' in des_estado:
+                            self.logger.info(f"Ticket {ticket} está listo para descarga (estado {cod_estado})")
                             return 'LISTO'
-                        elif 'PROCESANDO' in estado:
-                            self.logger.info(f"Ticket {ticket} aún procesando")
+                        elif cod_estado in ['1', '2', '3', '4', '5'] or 'PROCESANDO' in des_estado:
+                            self.logger.info(f"Ticket {ticket} aún procesando (estado {cod_estado})")
                             return 'PROCESANDO'
                         else:
-                            self.logger.warning(f"Estado desconocido para ticket {ticket}: {estado}")
+                            self.logger.warning(f"Estado desconocido para ticket {ticket}: {cod_estado} - {des_estado}")
                             return 'DESCONOCIDO'
 
             self.logger.warning(f"No se encontró información de estado para ticket {ticket}")

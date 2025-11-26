@@ -12,15 +12,21 @@ class SireRequestTask:
         self.logger = logger
         self.client = SireClient(logger, ruc)
 
-    def run(self, contribuyente: dict, tipo: str, periodo: str):
+    def run(self, contribuyente: dict, tipo: str, periodo: str = None):
         """
         Solicita una propuesta de reporte SIRE.
 
         Args:
             contribuyente: Datos del contribuyente
             tipo: 'ventas' o 'compras'
-            periodo: Período tributario (ej. '202509')
+            periodo: Período tributario (ej. '202509'), si None usa mes anterior
         """
+        if periodo is None:
+            # Usar mes anterior
+            from datetime import datetime, timedelta
+            last_month = datetime.now().replace(day=1) - timedelta(days=1)
+            periodo = last_month.strftime("%Y%m")
+
         self.logger.info(f"Solicitando reporte SIRE {tipo} para RUC {contribuyente['ruc']}, período {periodo}")
 
         try:
