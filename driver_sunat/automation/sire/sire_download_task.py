@@ -5,71 +5,49 @@ from ...database import operations as db
 
 class SireDownloadTask:
     """
-    Tarea para descargar reportes SIRE listos.
+    Tarea para descargar un reporte SIRE usando parámetros pre-validados.
     """
 
-    def __init__(self, logger, ruc):
+    def __init__(self, logger, ruc, client: SireClient = None):
         self.logger = logger
-        self.client = SireClient(logger, ruc)
+        # Permite reutilizar un SireClient existente
+        self.client = client if client else SireClient(logger, ruc)
 
-    def run(self, contribuyente: dict, sire_id: int):
+    def run(self, contribuyente: dict, sire_id: int, download_params: dict):
         """
-        Descarga un reporte SIRE si está listo.
+        Descarga un archivo de reporte SIRE.
 
         Args:
-            contribuyente: Datos del contribuyente
-            sire_id: ID del registro en sire_reportes
+            contribuyente: Datos del contribuyente.
+            sire_id: ID del registro en la tabla sire_reportes para actualizar su estado.
+            download_params: Diccionario con los parámetros necesarios para la descarga,
+                             obtenidos de la consulta de estado.
         """
-        # Obtener datos del reporte
-        reports = db.get_pending_sire_reports()
-        report = next((r for r in reports if r['id'] == sire_id), None)
-        if not report:
-            self.logger.error(f"No se encontró reporte SIRE con ID {sire_id}")
-            return
-
-        ticket = report['ticket']
-        tipo = report['tipo']
-        periodo = report['periodo']
-
-        self.logger.info(f"Verificando descarga para reporte SIRE ID {sire_id}, ticket {ticket}")
+        nom_archivo = download_params.get('nomArchivoReporte')
+        self.logger.info(f"Iniciando descarga del archivo '{nom_archivo}' para el reporte SIRE ID {sire_id}")
 
         try:
-            # Consultar estado primero
-            from .sire_status_task import SireStatusTask
-            status_task = SireStatusTask(self.logger)
-            estado = status_task.run(contribuyente, ticket, tipo, periodo)
+            file_path = self.client.download_file(
+                contribuyente['ruc'],
+                contribuyente['user_sol'],
+                contribuyente['password_sol'],
+                download_params
+            )
 
-            if estado == 'LISTO':
-                # Asumir datos de archivo (en producción, obtener de status response)
-                nom_archivo = f"LE{contribuyente['ruc']}{periodo}0100014040001EXP2.zip"  # Ejemplo
-                cod_tipo_archivo = "00"
-                cod_libro = "140000"  # Ajustar según tipo
-
-                file_path = self.client.download_file(
-                    contribuyente['ruc'],
-                    contribuyente['user_sol'],
-                    contribuyente['password_sol'],
-                    tipo,
-                    periodo,
-                    ticket,
+            if file_path:
+                # Actualizar el estado en la base de datos
+                db.update_sire_status(
+                    sire_id,
+                    'DESCARGADO',
                     nom_archivo,
-                    cod_tipo_archivo,
-                    cod_libro
+                    datetime.now().isoformat()
                 )
-
-                if file_path:
-                    db.update_sire_status(
-                        sire_id,
-                        'DESCARGADO',
-                        nom_archivo,
-                        datetime.now().isoformat()
-                    )
-                    self.logger.info(f"Reporte SIRE ID {sire_id} descargado exitosamente")
-                else:
-                    self.logger.error("Fallo en descarga del archivo")
+                self.logger.info(f"Reporte SIRE ID {sire_id} marcado como DESCARGADO.")
             else:
-                self.logger.info(f"Reporte SIRE ID {sire_id} no está listo aún (estado: {estado})")
+                self.logger.error(f"La descarga del reporte SIRE ID {sire_id} falló, no se recibió una ruta de archivo.")
+                db.update_sire_status(sire_id, 'ERROR')
 
         except Exception as e:
-            self.logger.error(f"Error descargando reporte SIRE ID {sire_id}: {e}")
-            raise
+            self.logger.error(f"Error crítico durante la descarga del reporte SIRE ID {sire_id}: {e}")
+            db.update_sire_status(sire_id, 'ERROR')
+            # No relanzar la excepción para no detener el procesamiento de otros reportes
