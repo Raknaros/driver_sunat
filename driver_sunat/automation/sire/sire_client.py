@@ -4,6 +4,10 @@ from datetime import datetime, timedelta
 from ...config import config
 from ...database import operations as db
 
+class SireNoComprobantesError(Exception):
+    """Lanzada cuando la API SIRE devuelve un error 1070 (sin comprobantes)."""
+    pass
+
 class SireClient:
     """
     Cliente para interactuar con la API SIRE de SUNAT.
@@ -95,7 +99,17 @@ class SireClient:
                 response = requests.request(method, url, headers=headers, params=params, timeout=30)
                 response.raise_for_status()
                 return response.json()
+
             except requests.exceptions.HTTPError as e:
+                # Manejo de error 422 / 1070
+                if e.response.status_code == 422:
+                    try:
+                        error_data = e.response.json()
+                        if any(err.get('cod') == '1070' for err in error_data.get('errors', [])):
+                            raise SireNoComprobantesError(error_data)
+                    except (ValueError, KeyError):
+                        pass # Si el JSON no es válido o no tiene la estructura, se trata como error normal
+
                 if e.response.status_code == 401:  # Token expirado
                     self.logger.warning("Token expirado o inválido, intentando refrescar...")
                     self.token = None # Forzar refresh
