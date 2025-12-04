@@ -2,6 +2,7 @@
 import os
 import logging
 from dotenv import load_dotenv
+from enum import Enum, auto
 
 # Carga las variables de entorno desde un archivo .env
 load_dotenv()
@@ -56,6 +57,18 @@ class Config:
 
 # Creamos una instancia de la configuración para importarla fácilmente en otros módulos
 config = Config()
+
+class PortalSunat(Enum):
+    """Enum para representar los diferentes portales de SUNAT."""
+    TRAMITES_Y_CONSULTAS = auto()
+    MIS_DECLARACIONES_Y_PAGO = auto()
+
+# Diccionario que mapea el portal a su selector CSS
+PORTAL_SELECTORS = {
+    PortalSunat.TRAMITES_Y_CONSULTAS: "a[href='javascript:tramiteConsulta()']",
+    PortalSunat.MIS_DECLARACIONES_Y_PAGO: "a[href='javascript:declaraSimplificadaNueva()']"
+}
+
 
 # Configuración global de logging
 def setup_logging():

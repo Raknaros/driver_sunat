@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime
+from datetime import datetime, timedelta
 from .sire_client import SireClient
 from ...database import operations as db
 
@@ -24,7 +24,6 @@ class SireRequestTask:
         """
         if periodo is None:
             # Usar mes anterior
-            from datetime import datetime, timedelta
             last_month = datetime.now().replace(day=1) - timedelta(days=1)
             periodo = last_month.strftime("%Y%m")
 

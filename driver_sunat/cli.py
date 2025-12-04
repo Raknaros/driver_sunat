@@ -101,12 +101,25 @@ def download_reports(ruc):
 
 # --- Comandos para SIRE ---
 
-@tasks.command()
-def sire_proposals_request():
-    """Solicita propuestas SIRE (Ventas/Compras) para todos los contribuyentes activos."""
-    click.echo(click.style("Ejecutando la solicitud de propuestas SIRE para todos los contribuyentes...", fg="blue"))
+@tasks.command(name="sire-request")
+@click.option('--periodo', 'periodo_unico', help="Periodo único a solicitar (formato YYYYMM).")
+@click.option('--desde', 'desde_periodo', help="Periodo inicial del rango a solicitar (formato YYYYMM).")
+@click.option('--hasta', 'hasta_periodo', help="Periodo final del rango a solicitar (formato YYYYMM).")
+def sire_proposals_request_command(periodo_unico, desde_periodo, hasta_periodo):
+    """
+    Solicita propuestas SIRE (Ventas/Compras) para todos los contribuyentes activos.
+    Puede solicitar un periodo, un rango o el mes anterior por defecto.
+    """
+    if periodo_unico and (desde_periodo or hasta_periodo):
+        raise click.UsageError("No se puede usar --periodo junto con --desde o --hasta.")
+    
+    click.echo(click.style("Ejecutando la solicitud de propuestas SIRE...", fg="blue"))
     try:
-        run_sire_proposals_request()
+        run_sire_proposals_request(
+            periodo_unico=periodo_unico,
+            desde_periodo=desde_periodo,
+            hasta_periodo=hasta_periodo
+        )
         click.echo(click.style("Solicitud de propuestas SIRE completada.", fg="green"))
     except Exception as e:
         click.echo(click.style(f"Error durante la solicitud de propuestas SIRE: {e}", fg="red"))

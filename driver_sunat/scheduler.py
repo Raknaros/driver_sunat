@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import logging
 import time
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from .automation.driver_manager import get_webdriver
 from .automation.tasks.check_mailbox import CheckMailboxTask
@@ -12,55 +14,96 @@ from .automation.sire.sire_request_task import SireRequestTask
 from .automation.sire.sire_status_task import SireStatusTask
 from .automation.sire.sire_download_task import SireDownloadTask
 from .database import operations as db
-from .database.operations import get_active_contribuyentes, get_active_contribuyentes_with_sire_creds, initialize_local_db, sync_clients_from_central_db
+from .database.operations import get_active_contribuyentes, get_active_contribuyentes_with_sire_creds, initialize_local_db, sync_clients_from_central_db, update_central_db_observacion
 from .config import config
 
 logger = logging.getLogger(__name__)
 
-# --- Funciones de Tareas Individuales (para ejecución manual) ---
+# --- Constante de Reintentos ---
+MAX_TASK_RETRIES = 3
 
-def run_sire_proposals_request():
-    """Solicita propuestas SIRE para todos los contribuyentes con credenciales."""
+# --- Funciones Auxiliares ---
+
+def _generate_period_range(start_period: str, end_period: str) -> list[str]:
+    """Genera una lista de periodos en formato YYYYMM entre dos fechas."""
+    try:
+        start_date = datetime.strptime(start_period, "%Y%m")
+        end_date = datetime.strptime(end_period, "%Y%m")
+    except ValueError:
+        logger.error("Formato de periodo inválido. Use YYYYMM.")
+        return []
+
+    periods = []
+    current_date = start_date
+    while current_date <= end_date:
+        periods.append(current_date.strftime("%Y%m"))
+        current_date += relativedelta(months=1)
+    return periods
+
+# --- Funciones de Tareas Individuales ---
+
+def run_sire_proposals_request(periodo_unico=None, desde_periodo=None, hasta_periodo=None):
+    """
+    Solicita propuestas SIRE para todos los contribuyentes con credenciales.
+    Puede procesar un periodo único, un rango, o el mes anterior por defecto.
+    """
     logger.info("INICIANDO TAREA: Solicitud de propuestas SIRE")
+
+    periods_to_process = []
+    if periodo_unico:
+        periods_to_process = [periodo_unico]
+        logger.info(f"Se procesará el periodo específico: {periodo_unico}")
+    elif desde_periodo and hasta_periodo:
+        periods_to_process = _generate_period_range(desde_periodo, hasta_periodo)
+        logger.info(f"Se procesará el rango de periodos desde {desde_periodo} hasta {hasta_periodo}: {len(periods_to_process)} periodos en total.")
+    else:
+        last_month = datetime.now().replace(day=1) - timedelta(days=1)
+        default_period = last_month.strftime("%Y%m")
+        periods_to_process = [default_period]
+        logger.info(f"No se especificó periodo. Se usará el mes anterior por defecto: {default_period}")
+
+    if not periods_to_process:
+        logger.error("No se pudieron determinar los periodos a procesar. Abortando.")
+        return
+
     contribuyentes = get_active_contribuyentes_with_sire_creds()
     if not contribuyentes:
         logger.warning("No hay contribuyentes activos con credenciales SIRE válidas para procesar.")
         return
 
-    tipos = ['ventas', 'compras']
-    solicitudes_count = 0
+    logger.info(f"Se procesarán {len(contribuyentes)} contribuyentes para {len(periods_to_process)} periodo(s).")
+    
     sire_clients = {}  # Cache de clientes para reutilizar tokens
+    tipos = ['ventas', 'compras']
 
     for contribuyente in contribuyentes:
         ruc = contribuyente['ruc']
         if ruc not in sire_clients:
             sire_clients[ruc] = SireClient(logger, ruc)
-        
         client = sire_clients[ruc]
 
         for tipo in tipos:
-            try:
-                # La tarea ahora puede aceptar un cliente existente
-                task = SireRequestTask(logger, ruc, client=client)
-                sire_id = task.run(contribuyente, tipo)
-                if sire_id:
-                    solicitudes_count += 1
-            except Exception as e:
-                error_msg = f"Error solicitando propuesta SIRE {tipo} para RUC {ruc}: {e}"
-                logger.error(error_msg)
-                db.add_observation(ruc, error_msg, "LOCAL")
+            for periodo in periods_to_process:
+                try:
+                    task = SireRequestTask(logger, ruc, client=client)
+                    task.run(contribuyente, tipo, periodo=periodo)
+                except Exception as e:
+                    error_msg = f"Error solicitando propuesta SIRE {tipo} para RUC {ruc} en periodo {periodo}: {e}"
+                    logger.error(error_msg)
+                    db.add_observation(ruc, error_msg, "LOCAL")
     
-    logger.info(f"Tarea finalizada. Se iniciaron {solicitudes_count} solicitudes de reporte SIRE.")
+    logger.info(f"Tarea de solicitud de propuestas SIRE finalizada.")
+
 
 def run_sire_status_check():
     """Verifica el estado de los reportes SIRE solicitados y los descarga si están listos."""
     logger.info("INICIANDO TAREA: Verificación de estado de reportes SIRE")
 
     max_wait_minutes = 30
-    check_interval_seconds = 120  # 2 minutos
+    check_interval_seconds = 120
     start_time = time.time()
     
-    sire_clients = {} # Cache de clientes para reutilizar tokens durante la verificación
+    sire_clients = {}
 
     while time.time() - start_time < max_wait_minutes * 60:
         pending_reports = db.get_pending_sire_reports()
@@ -70,7 +113,6 @@ def run_sire_status_check():
 
         logger.info(f"Quedan {len(pending_reports)} reportes SIRE pendientes. Verificando estado...")
         
-        # Obtener la lista completa de contribuyentes una sola vez por ciclo
         contribuyentes_activos = get_active_contribuyentes_with_sire_creds()
         
         for report in pending_reports:
@@ -81,12 +123,10 @@ def run_sire_status_check():
                     logger.warning(f"No se encontró contribuyente activo para RUC {ruc}. Omitiendo reporte ID {report['id']}.")
                     continue
 
-                # Reutilizar o crear el SireClient para el RUC actual
                 if ruc not in sire_clients:
                     sire_clients[ruc] = SireClient(logger, ruc)
                 client = sire_clients[ruc]
 
-                # Pasar el cliente a la tarea de estado para reutilizar el token
                 status_task = SireStatusTask(logger, ruc, client=client)
                 status_result = status_task.run(contribuyente, report['ticket'], report['periodo'])
                 
@@ -96,14 +136,13 @@ def run_sire_status_check():
                     logger.info(f"Reporte SIRE ID {report['id']} (RUC {ruc}) está LISTO. Iniciando descarga.")
                     download_params = status_result.get('params')
                     
-                    # Pasar el cliente a la tarea de descarga
                     download_task = SireDownloadTask(logger, ruc, client=client)
                     download_task.run(contribuyente, report['id'], download_params)
 
                 elif estado == 'ERROR':
-                     logger.error(f"Reporte SIRE ID {report['id']} (RUC {ruc}) tiene estado de ERROR en SUNAT. Se marcará como tal.")
+                     logger.error(f"Reporte SIRE ID {report['id']} (RUC {ruc}) tiene estado de ERROR en SUNAT.")
                      db.update_sire_status(report['id'], 'ERROR')
-                else: # PROCESANDO u otro
+                else:
                     logger.info(f"Reporte SIRE ID {report['id']} (RUC {ruc}) sigue en estado: {estado}.")
 
             except Exception as e:
@@ -111,12 +150,10 @@ def run_sire_status_check():
                 logger.error(error_msg)
                 db.add_observation(ruc, error_msg, "LOCAL")
         
-        # Si todavía hay reportes pendientes después de la ronda, esperar
         if db.get_pending_sire_reports():
             logger.info(f"Esperando {check_interval_seconds} segundos para la siguiente verificación...")
             time.sleep(check_interval_seconds)
     else:
-        # Este bloque se ejecuta si el bucle while termina por timeout
         if db.get_pending_sire_reports():
             logger.warning(f"Timeout de {max_wait_minutes} minutos alcanzado. Algunos reportes SIRE siguen pendientes.")
 
@@ -126,156 +163,138 @@ def run_sire_status_check():
 # --- Jobs para el Scheduler (APScheduler) ---
 
 def job_sire_full_process():
-    """Job mensual que ejecuta el proceso completo de SIRE: solicita y luego verifica/descarga."""
+    """Job mensual que ejecuta el proceso completo de SIRE (mes anterior)."""
     logger.info("INICIANDO JOB MENSUAL: Proceso completo de propuestas SIRE")
-    run_sire_proposals_request()
+    run_sire_proposals_request() # Llama sin argumentos para usar el mes anterior
     run_sire_status_check()
     logger.info("JOB MENSUAL FINALIZADO: Proceso completo de propuestas SIRE")
 
-# ... (El resto de funciones de jobs y scheduler no necesitan cambios) ...
-
 def job_check_all_mailboxes():
-    """Job que obtiene todos los clientes activos y ejecuta la revisión de buzón para cada uno."""
+    """Job que revisa el buzón para todos los contribuyentes con arquitectura infalible."""
     logger.info("INICIANDO JOB PROGRAMADO: Revisión de todos los buzones")
-
     contribuyentes = get_active_contribuyentes()
     if not contribuyentes:
-        logger.warning("No hay contribuyentes activos en la BD local para procesar.")
+        logger.warning("No hay contribuyentes activos para procesar.")
         return
 
     logger.info(f"Se procesarán {len(contribuyentes)} contribuyentes.")
-    driver = get_webdriver(headless=False)
-    try:
-        task = CheckMailboxTask(driver)
-        for client in contribuyentes:
-            task.run(client)
-            logger.debug(f"Procesado contribuyente {client['ruc']}")
-    finally:
-        driver.quit()
 
-    # Sync determinantes observations to central DB
+    for client in contribuyentes:
+        success = False
+        for attempt in range(MAX_TASK_RETRIES):
+            driver = None
+            try:
+                logger.info(f"Procesando RUC {client['ruc']}, Intento {attempt + 1}/{MAX_TASK_RETRIES}")
+                driver = get_webdriver(headless=False)
+                task = CheckMailboxTask(driver)
+                task.run(client)
+                success = True
+                break
+            except Exception as e:
+                logger.error(f"Intento {attempt + 1} falló para RUC {client['ruc']}: {e}")
+                if attempt < MAX_TASK_RETRIES - 1:
+                    logger.info("Se reiniciará el driver y se reintentará...")
+                else:
+                    logger.critical(f"Todos los {MAX_TASK_RETRIES} intentos fallaron para RUC {client['ruc']}. Registrando observación.")
+                    update_central_db_observacion(client['ruc'], "FALLA CRITICA AUTOMATIZACION")
+            finally:
+                if driver:
+                    driver.quit()
+        
+        if success:
+            logger.info(f"Tarea completada exitosamente para RUC {client['ruc']}.")
+
     db.sync_determinant_observations_to_central()
-
     logger.info("JOB PROGRAMADO FINALIZADO: Revisión de buzones")
 
+# ... (El resto de las funciones de jobs y el scheduler se mantienen igual) ...
 def job_check_mailbox_for_ruc(ruc: str):
-    """Job que ejecuta la revisión de buzón para un RUC específico."""
+    """Job que ejecuta la revisión de buzón para un RUC específico con reintentos."""
     logger.info(f"INICIANDO JOB: Revisión de buzón para RUC {ruc}")
-
-    contribuyentes = get_active_contribuyentes()
-    contribuyente = next((c for c in contribuyentes if c['ruc'] == ruc), None)
-
+    contribuyente = next((c for c in get_active_contribuyentes() if c['ruc'] == ruc), None)
     if not contribuyente:
         logger.error(f"RUC {ruc} no encontrado o no activo")
         return
 
-    driver = get_webdriver(headless=False)
-    try:
-        task = CheckMailboxTask(driver)
-        task.run(contribuyente)
-        logger.info(f"JOB FINALIZADO: Revisión de buzón para RUC {ruc}")
-    finally:
-        driver.quit()
+    for attempt in range(MAX_TASK_RETRIES):
+        driver = None
+        try:
+            logger.info(f"Procesando RUC {ruc}, Intento {attempt + 1}/{MAX_TASK_RETRIES}")
+            driver = get_webdriver(headless=False)
+            task = CheckMailboxTask(driver)
+            task.run(contribuyente)
+            logger.info(f"JOB FINALIZADO: Revisión de buzón para RUC {ruc}")
+            return # Termina la función si es exitoso
+        except Exception as e:
+            logger.error(f"Intento {attempt + 1} falló para RUC {ruc}: {e}")
+        finally:
+            if driver:
+                driver.quit()
+    
+    logger.critical(f"Todos los intentos fallaron para RUC {ruc}.")
+    update_central_db_observacion(ruc, "FALLA CRITICA AUTOMATIZACION")
+
 
 def job_download_invoices_for_ruc(ruc: str, start_date=None, end_date=None):
-    """Job que descarga facturas para un RUC específico."""
-    from datetime import datetime, timedelta
-
-    # Si no se especifican fechas, usar el mes actual
+    """Job que descarga facturas para un RUC específico con reintentos."""
     if not start_date or not end_date:
         today = datetime.now()
         start_date = f"01/{today.month:02d}/{today.year}"
-        # Último día del mes
         next_month = today.replace(day=28) + timedelta(days=4)
         end_date = f"{(next_month - timedelta(days=next_month.day)).day:02d}/{today.month:02d}/{today.year}"
 
     logger.info(f"INICIANDO JOB: Descarga de facturas para RUC {ruc} ({start_date} - {end_date})")
-
-    contribuyentes = get_active_contribuyentes()
-    contribuyente = next((c for c in contribuyentes if c['ruc'] == ruc), None)
-
+    contribuyente = next((c for c in get_active_contribuyentes() if c['ruc'] == ruc), None)
     if not contribuyente:
         logger.error(f"RUC {ruc} no encontrado o no activo")
         return
 
-    driver = get_webdriver(headless=True)
-    try:
-        task = DownloadInvoicesTask(driver)
-        task.run(contribuyente, start_date, end_date)
-        logger.info(f"JOB FINALIZADO: Descarga de facturas para RUC {ruc}")
-    finally:
-        driver.quit()
+    for attempt in range(MAX_TASK_RETRIES):
+        driver = None
+        try:
+            logger.info(f"Procesando RUC {ruc}, Intento {attempt + 1}/{MAX_TASK_RETRIES}")
+            driver = get_webdriver(headless=True)
+            task = DownloadInvoicesTask(driver)
+            task.run(contribuyente, start_date, end_date)
+            logger.info(f"JOB FINALIZADO: Descarga de facturas para RUC {ruc}")
+            return
+        except Exception as e:
+            logger.error(f"Intento {attempt + 1} falló para RUC {ruc}: {e}")
+        finally:
+            if driver:
+                driver.quit()
+
+    logger.critical(f"Todos los intentos de descarga de facturas fallaron para RUC {ruc}.")
+    update_central_db_observacion(ruc, "FALLA CRITICA DESCARGA FACTURAS")
+
 
 def start_scheduler():
     initialize_local_db()
     scheduler = BlockingScheduler(timezone="America/Lima")
 
-    """Configura e inicia el programador de tareas."""
-    initialize_local_db()
-    scheduler = BlockingScheduler(timezone="America/Lima")
-
-    # Tarea 1: Sincronizar clientes desde la BD central
+    # Tarea 1: Sincronizar clientes
     sync_config = config.SCHEDULE_CONFIG['sync_clients']
-    scheduler.add_job(
-        sync_clients_from_central_db,
-        trigger='cron',
-        hour=sync_config['hour'],
-        minute=sync_config['minute'],
-        name="Sincronización diaria de clientes"
-    )
+    scheduler.add_job(sync_clients_from_central_db, 'cron', hour=sync_config['hour'], minute=sync_config['minute'], name="Sincronización diaria de clientes")
 
-    # Tarea 2: Revisar los buzones de todos los clientes
+    # Tarea 2: Revisar buzones
     mailbox_config = config.SCHEDULE_CONFIG['check_mailbox']
-    scheduler.add_job(
-        job_check_all_mailboxes,
-        trigger='cron',
-        hour=mailbox_config['hour'],
-        minute=mailbox_config['minute'],
-        name="Revisión diaria de buzones SUNAT"
-    )
+    scheduler.add_job(job_check_all_mailboxes, 'cron', hour=mailbox_config['hour'], minute=mailbox_config['minute'], name="Revisión diaria de buzones SUNAT")
 
-    # Tarea 3: Descargar facturas mensuales (se ejecutará para todos los RUC activos)
+    # Tarea 3: Descargar facturas
     invoice_config = config.SCHEDULE_CONFIG['download_invoices']
-    scheduler.add_job(
-        job_download_all_invoices_monthly,
-        trigger='cron',
-        day=invoice_config['day'],
-        hour=invoice_config['hour'],
-        minute=invoice_config['minute'],
-        name="Descarga mensual de facturas"
-    )
+    scheduler.add_job(job_download_all_invoices_monthly, 'cron', day=invoice_config['day'], hour=invoice_config['hour'], minute=invoice_config['minute'], name="Descarga mensual de facturas")
 
-    # Tarea 4: Solicitar reportes T-Registro mensuales
+    # Tarea 4: Solicitar reportes T-Registro
     report_request_config = config.SCHEDULE_CONFIG.get('request_reports', {'day': 1, 'hour': 3, 'minute': 0})
-    scheduler.add_job(
-        job_request_reports_monthly,
-        trigger='cron',
-        day=report_request_config['day'],
-        hour=report_request_config['hour'],
-        minute=report_request_config['minute'],
-        name="Solicitud mensual de reportes T-Registro"
-    )
+    scheduler.add_job(job_request_reports_monthly, 'cron', day=report_request_config['day'], hour=report_request_config['hour'], minute=report_request_config['minute'], name="Solicitud mensual de reportes T-Registro")
 
-    # Tarea 5: Descargar reportes listos (diaria, después de la solicitud)
+    # Tarea 5: Descargar reportes T-Registro
     report_download_config = config.SCHEDULE_CONFIG.get('download_reports', {'hour': 9, 'minute': 0})
-    scheduler.add_job(
-        job_download_reports_for_all,
-        trigger='cron',
-        hour=report_download_config['hour'],
-        minute=report_download_config['minute'],
-        name="Descarga diaria de reportes T-Registro"
-    )
+    scheduler.add_job(job_download_reports_for_all, 'cron', hour=report_download_config['hour'], minute=report_download_config['minute'], name="Descarga diaria de reportes T-Registro")
 
-    # Tarea 6: Procesar reportes SIRE mensuales (día 9)
+    # Tarea 6: Proceso SIRE
     sire_config = config.SCHEDULE_CONFIG.get('sire_reports', {'day': 9, 'hour': 9, 'minute': 0})
-    scheduler.add_job(
-        job_sire_full_process,
-        trigger='cron',
-        day=sire_config['day'],
-        hour=sire_config['hour'],
-        minute=sire_config['minute'],
-        name="Proceso completo mensual de propuestas SIRE"
-    )
+    scheduler.add_job(job_sire_full_process, 'cron', day=sire_config['day'], hour=sire_config['hour'], minute=sire_config['minute'], name="Proceso completo mensual de propuestas SIRE")
 
     logger.info("Scheduler iniciado. Tareas programadas:")
     scheduler.print_jobs()
@@ -286,74 +305,64 @@ def start_scheduler():
     except (KeyboardInterrupt, SystemExit):
         logger.info("Scheduler detenido.")
 
+
 def job_download_all_invoices_monthly():
     """Job mensual que descarga facturas para todos los contribuyentes activos."""
-    logger.info("INICIANDO JOB MENSUAL: Descarga de facturas para todos los contribuyentes")
-
+    logger.info("INICIANDO JOB MENSUAL: Descarga de facturas para todos")
     contribuyentes = get_active_contribuyentes()
     if not contribuyentes:
         logger.warning("No hay contribuyentes activos para descargar facturas.")
         return
-
-    logger.info(f"Se procesarán {len(contribuyentes)} contribuyentes para descarga de facturas.")
-
+    logger.info(f"Se procesarán {len(contribuyentes)} contribuyentes.")
     for contribuyente in contribuyentes:
-        try:
-            job_download_invoices_for_ruc(contribuyente['ruc'])
-            logger.debug(f"Descarga completada para RUC {contribuyente['ruc']}")
-        except Exception as e:
-            logger.error(f"Error descargando facturas para RUC {contribuyente['ruc']}: {e}")
-
+        job_download_invoices_for_ruc(contribuyente['ruc'])
     logger.info("JOB MENSUAL FINALIZADO: Descarga de facturas")
 
-def job_request_reports_monthly():
-    """Job mensual que solicita reportes T-Registro para todos los contribuyentes activos."""
-    logger.info("INICIANDO JOB MENSUAL: Solicitud de reportes T-Registro")
 
+def job_request_reports_monthly():
+    """Job mensual que solicita reportes T-Registro para todos los contribuyentes."""
+    logger.info("INICIANDO JOB MENSUAL: Solicitud de reportes T-Registro")
     contribuyentes = get_active_contribuyentes()
     if not contribuyentes:
         logger.warning("No hay contribuyentes activos para solicitar reportes.")
         return
-
-    # Tipo de reporte a solicitar (solo uno por mes para evitar sobrecarga)
-    tipo_reporte = "6"  # Reporte de prestadores de servicios
-
+    
+    tipo_reporte = "6"
     for contribuyente in contribuyentes:
-        driver = get_webdriver(headless=True)
-        try:
-            task = RequestReportTask(driver)
-            report_id = task.run(contribuyente, tipo_reporte)
-
-            if report_id:
-                logger.info(f"Reporte solicitado exitosamente para RUC {contribuyente['ruc']} - esperando 1 hora para descarga")
-
-            logger.debug(f"Solicitud de reporte completada para RUC {contribuyente['ruc']}")
-        except Exception as e:
-            logger.error(f"Error solicitando reporte para RUC {contribuyente['ruc']}: {e}")
-        finally:
-            driver.quit()
-
+        for attempt in range(MAX_TASK_RETRIES):
+            driver = None
+            try:
+                driver = get_webdriver(headless=True)
+                task = RequestReportTask(driver)
+                task.run(contribuyente, tipo_reporte)
+                break
+            except Exception as e:
+                logger.error(f"Intento {attempt + 1} falló para RUC {contribuyente['ruc']}: {e}")
+            finally:
+                if driver:
+                    driver.quit()
     logger.info("JOB MENSUAL FINALIZADO: Solicitud de reportes T-Registro")
-    logger.info("Los reportes estarán disponibles para descarga en aproximadamente 1 hora")
+
 
 def job_download_reports_for_all():
     """Job que descarga reportes listos para todos los contribuyentes."""
     logger.info("INICIANDO JOB: Descarga de reportes listos para todos")
-
     contribuyentes = get_active_contribuyentes()
     if not contribuyentes:
         logger.warning("No hay contribuyentes activos para descargar reportes.")
         return
 
     for contribuyente in contribuyentes:
-        driver = get_webdriver(headless=True)
-        try:
-            task = DownloadReportTask(driver)
-            task.run(contribuyente)
-        except Exception as e:
-            logger.error(f"Error descargando reportes para RUC {contribuyente['ruc']}: {e}")
-        finally:
-            driver.quit()
-
+        for attempt in range(MAX_TASK_RETRIES):
+            driver = None
+            try:
+                driver = get_webdriver(headless=True)
+                task = DownloadReportTask(driver)
+                task.run(contribuyente)
+                break
+            except Exception as e:
+                logger.error(f"Intento {attempt + 1} falló para RUC {contribuyente['ruc']}: {e}")
+            finally:
+                if driver:
+                    driver.quit()
     logger.info("JOB FINALIZADO: Descarga de reportes para todos")
-
