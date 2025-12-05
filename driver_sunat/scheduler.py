@@ -15,7 +15,7 @@ from .automation.sire.sire_request_task import SireRequestTask
 from .automation.sire.sire_status_task import SireStatusTask
 from .automation.sire.sire_download_task import SireDownloadTask
 from .database import operations as db
-from .database.operations import get_active_contribuyentes, get_active_contribuyentes_with_sire_creds, initialize_local_db, sync_clients_from_central_db, update_central_db_observacion
+from .database.operations import get_active_contribuyentes, get_active_contribuyentes_with_sire_creds, initialize_local_db, sync_clients_from_central_db, update_central_db_observacion, get_contribuyentes_with_pending_reports
 from .config import config
 
 logger = logging.getLogger(__name__)
@@ -310,28 +310,52 @@ def job_request_reports_monthly(tipo_reporte: str = "6"):
     
     logger.info("JOB MENSUAL FINALIZADO: Solicitud de reportes T-Registro")
 
-def job_download_reports_for_all():
-    """Job que descarga reportes listos para todos los contribuyentes."""
-    logger.info("INICIANDO JOB: Descarga de reportes listos para todos")
-    contribuyentes = get_active_contribuyentes()
-    if not contribuyentes:
-        logger.warning("No hay contribuyentes activos para descargar reportes.")
+def job_download_report_for_ruc(ruc: str):
+    """Descarga reportes T-Registro listos para un RUC específico con reintentos."""
+    logger.info(f"INICIANDO JOB: Descarga de reportes T-Registro para RUC {ruc}")
+    contribuyente = next((c for c in get_active_contribuyentes() if c['ruc'] == ruc), None)
+    if not contribuyente:
+        logger.error(f"RUC {ruc} no encontrado o no activo para descargar reportes.")
         return
 
+    for attempt in range(MAX_TASK_RETRIES):
+        driver = None
+        try:
+            logger.info(f"Procesando descargas para RUC {ruc}, Intento {attempt + 1}/{MAX_TASK_RETRIES}")
+            driver = get_webdriver(headless=False)
+            task = DownloadReportTask(driver)
+            task.run(contribuyente)
+            logger.info(f"Descargas para RUC {ruc} completadas exitosamente.")
+            return
+        except Exception as e:
+            logger.error(f"Intento {attempt + 1} de descarga falló para RUC {ruc}: {e}")
+            if attempt >= MAX_TASK_RETRIES - 1:
+                logger.critical(f"Todos los intentos de descarga fallaron para RUC {ruc}.")
+                update_central_db_observacion(ruc, "FALLA CRITICA DESCARGA REPORTE")
+        finally:
+            if driver:
+                driver.quit()
+
+def job_download_reports_for_all():
+    """
+    Job que descarga reportes T-Registro listos, procesando únicamente
+    a los contribuyentes que tienen reportes en estado 'SOLICITADO'.
+    """
+    logger.info("INICIANDO JOB: Descarga de reportes T-Registro pendientes.")
+    
+    contribuyentes = db.get_contribuyentes_with_pending_reports()
+    
+    if not contribuyentes:
+        logger.info("No hay contribuyentes con reportes T-Registro pendientes de descarga.")
+        return
+
+    logger.info(f"Se encontraron {len(contribuyentes)} contribuyentes con reportes pendientes.")
+
     for contribuyente in contribuyentes:
-        for attempt in range(MAX_TASK_RETRIES):
-            driver = None
-            try:
-                driver = get_webdriver(headless=False)
-                task = DownloadReportTask(driver)
-                task.run(contribuyente)
-                break
-            except Exception as e:
-                logger.error(f"Intento {attempt + 1} falló para RUC {contribuyente['ruc']}: {e}")
-            finally:
-                if driver:
-                    driver.quit()
-    logger.info("JOB FINALIZADO: Descarga de reportes para todos")
+        job_download_report_for_ruc(contribuyente['ruc'])
+    
+    logger.info("JOB FINALIZADO: Descarga de reportes T-Registro.")
+
 
 def start_scheduler():
     initialize_local_db()

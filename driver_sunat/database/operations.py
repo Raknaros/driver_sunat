@@ -653,3 +653,45 @@ def get_sire_credentials(ruc: str):
             'user_sol': row[2]
         }
     return None
+
+def get_contribuyentes_with_pending_reports():
+    """
+    Obtiene una lista de contribuyentes activos que tienen al menos un reporte
+    T-Registro con estado 'SOLICITADO'.
+
+    Returns:
+        list[dict]: Una lista de diccionarios, donde cada diccionario
+                    representa a un contribuyente con reportes pendientes.
+    """
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+    query = """
+        SELECT DISTINCT
+            c.ruc,
+            c.user_sol,
+            c.password_sol_encrypted
+        FROM
+            contribuyentes c
+        JOIN
+            reportes_tregistro r ON c.ruc = r.ruc
+        WHERE
+            c.is_active = 1
+            AND r.estado = 'SOLICITADO';
+    """
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    conn.close()
+
+    key = config.ENCRYPTION_KEY.encode('utf-8')
+    contribuyentes = []
+    for row in rows:
+        try:
+            decrypted_pass = decrypt_password(row['password_sol_encrypted'], key)
+            contribuyentes.append({
+                "ruc": row['ruc'],
+                "user_sol": row['user_sol'],
+                "password_sol": decrypted_pass
+            })
+        except Exception as e:
+            print(f"ADVERTENCIA: No se pudo descifrar la contraseña para el RUC {row['ruc']}. Error: {e}")
+    return contribuyentes

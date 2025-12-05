@@ -7,7 +7,9 @@ from .scheduler import (
     run_sire_proposals_request, 
     run_sire_status_check,
     job_request_reports_monthly,
-    job_request_report_for_ruc # Necesitaremos crear esta función
+    job_request_report_for_ruc,
+    job_download_reports_for_all,
+    job_download_report_for_ruc
 )
 from .database.operations import (
     initialize_local_db, 
@@ -85,7 +87,9 @@ def check_mailbox(ruc):
 def download_invoices(ruc, start_date, end_date):
     """Descarga facturas para un RUC específico en rango de fechas."""
     click.echo(click.style(f"Descargando facturas para RUC {ruc} ({start_date} - {end_date})", fg="blue"))
-    # ... (la lógica interna no cambia)
+    # La lógica de ejecución está en el scheduler para mantener la consistencia
+    from .scheduler import job_download_invoices_for_ruc
+    job_download_invoices_for_ruc(ruc, start_date, end_date)
     
 @tasks.command(name="request-report")
 @click.option('--ruc', help='RUC específico a procesar.')
@@ -108,11 +112,18 @@ def request_report_command(ruc, process_all, tipo_reporte):
     click.echo(click.style("Tarea de solicitud de reportes finalizada.", fg="green"))
 
 
-@tasks.command()
-@click.option('--ruc', help='RUC específico (opcional, por defecto todos los activos)')
-def download_reports(ruc):
-    """Descarga reportes T-Registro listos para un RUC o todos."""
-    # ... (la lógica interna no cambia)
+@tasks.command(name="download-reports")
+@click.option('--ruc', help='RUC específico a procesar (opcional).')
+def download_reports_command(ruc):
+    """Descarga reportes T-Registro listos para un RUC o para todos los que tengan pendientes."""
+    if ruc:
+        click.echo(click.style(f"Descargando reportes listos para RUC: {ruc}", fg="blue"))
+        job_download_report_for_ruc(ruc)
+    else:
+        click.echo(click.style("Descargando reportes listos para TODOS los contribuyentes con pendientes...", fg="blue"))
+        job_download_reports_for_all()
+    
+    click.echo(click.style("Tarea de descarga de reportes finalizada.", fg="green"))
 
 # --- Comandos para SIRE ---
 
