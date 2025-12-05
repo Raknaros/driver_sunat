@@ -9,6 +9,10 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from ...config import config, PortalSunat, PORTAL_SELECTORS
 from ...database.operations import update_central_db_observacion, add_observation
 
+class BusinessRuleException(Exception):
+    """Indica un fallo debido a una regla de negocio que no debe ser reintentado."""
+    pass
+
 class BaseTask:
     """
     Clase base para todas las tareas de automatización.

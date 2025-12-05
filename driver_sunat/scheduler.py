@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from .automation.driver_manager import get_webdriver
+from .automation.tasks.base_task import BusinessRuleException
 from .automation.tasks.check_mailbox import CheckMailboxTask
 from .automation.tasks.download_invoices import DownloadInvoicesTask
 from .automation.tasks.request_report import RequestReportTask
@@ -207,7 +208,6 @@ def job_check_all_mailboxes():
     db.sync_determinant_observations_to_central()
     logger.info("JOB PROGRAMADO FINALIZADO: Revisión de buzones")
 
-# ... (El resto de las funciones de jobs y el scheduler se mantienen igual) ...
 def job_check_mailbox_for_ruc(ruc: str):
     """Job que ejecuta la revisión de buzón para un RUC específico con reintentos."""
     logger.info(f"INICIANDO JOB: Revisión de buzón para RUC {ruc}")
@@ -224,7 +224,7 @@ def job_check_mailbox_for_ruc(ruc: str):
             task = CheckMailboxTask(driver)
             task.run(contribuyente)
             logger.info(f"JOB FINALIZADO: Revisión de buzón para RUC {ruc}")
-            return # Termina la función si es exitoso
+            return
         except Exception as e:
             logger.error(f"Intento {attempt + 1} falló para RUC {ruc}: {e}")
         finally:
@@ -233,7 +233,6 @@ def job_check_mailbox_for_ruc(ruc: str):
     
     logger.critical(f"Todos los intentos fallaron para RUC {ruc}.")
     update_central_db_observacion(ruc, "FALLA CRITICA AUTOMATIZACION")
-
 
 def job_download_invoices_for_ruc(ruc: str, start_date=None, end_date=None):
     """Job que descarga facturas para un RUC específico con reintentos."""
@@ -253,7 +252,7 @@ def job_download_invoices_for_ruc(ruc: str, start_date=None, end_date=None):
         driver = None
         try:
             logger.info(f"Procesando RUC {ruc}, Intento {attempt + 1}/{MAX_TASK_RETRIES}")
-            driver = get_webdriver(headless=True)
+            driver = get_webdriver(headless=False)
             task = DownloadInvoicesTask(driver)
             task.run(contribuyente, start_date, end_date)
             logger.info(f"JOB FINALIZADO: Descarga de facturas para RUC {ruc}")
@@ -267,6 +266,72 @@ def job_download_invoices_for_ruc(ruc: str, start_date=None, end_date=None):
     logger.critical(f"Todos los intentos de descarga de facturas fallaron para RUC {ruc}.")
     update_central_db_observacion(ruc, "FALLA CRITICA DESCARGA FACTURAS")
 
+def job_request_report_for_ruc(ruc: str, tipo_reporte: str):
+    """Solicita un reporte T-Registro para un RUC específico con reintentos."""
+    logger.info(f"INICIANDO JOB: Solicitud de reporte T-Registro tipo {tipo_reporte} para RUC {ruc}")
+    contribuyente = next((c for c in get_active_contribuyentes() if c['ruc'] == ruc), None)
+    if not contribuyente:
+        logger.error(f"RUC {ruc} no encontrado o no activo para solicitar reporte.")
+        return
+
+    for attempt in range(MAX_TASK_RETRIES):
+        driver = None
+        try:
+            logger.info(f"Procesando RUC {ruc}, Intento {attempt + 1}/{MAX_TASK_RETRIES}")
+            driver = get_webdriver(headless=False)
+            task = RequestReportTask(driver)
+            task.run(contribuyente, tipo_reporte)
+            logger.info(f"Solicitud de reporte para RUC {ruc} completada exitosamente.")
+            return # Termina la función si es exitoso
+        except BusinessRuleException as bre:
+            logger.warning(f"Fallo por regla de negocio para RUC {ruc}: {bre}. No se reintentará.")
+            # La observación ya fue registrada en la tarea, solo salimos del bucle.
+            break
+        except Exception as e:
+            logger.error(f"Intento {attempt + 1} de solicitud de reporte falló para RUC {ruc}: {e}")
+            if attempt >= MAX_TASK_RETRIES - 1:
+                logger.critical(f"Todos los intentos de solicitud de reporte fallaron para RUC {ruc}.")
+                update_central_db_observacion(ruc, "FALLA CRITICA SOLICITUD REPORTE")
+        finally:
+            if driver:
+                driver.quit()
+
+def job_request_reports_monthly(tipo_reporte: str = "6"):
+    """Job mensual que solicita reportes T-Registro para todos los contribuyentes activos."""
+    logger.info(f"INICIANDO JOB MENSUAL: Solicitud de reportes T-Registro tipo {tipo_reporte}")
+    contribuyentes = get_active_contribuyentes()
+    if not contribuyentes:
+        logger.warning("No hay contribuyentes activos para solicitar reportes.")
+        return
+    
+    logger.info(f"Se procesarán {len(contribuyentes)} contribuyentes.")
+    for contribuyente in contribuyentes:
+        job_request_report_for_ruc(contribuyente['ruc'], tipo_reporte)
+    
+    logger.info("JOB MENSUAL FINALIZADO: Solicitud de reportes T-Registro")
+
+def job_download_reports_for_all():
+    """Job que descarga reportes listos para todos los contribuyentes."""
+    logger.info("INICIANDO JOB: Descarga de reportes listos para todos")
+    contribuyentes = get_active_contribuyentes()
+    if not contribuyentes:
+        logger.warning("No hay contribuyentes activos para descargar reportes.")
+        return
+
+    for contribuyente in contribuyentes:
+        for attempt in range(MAX_TASK_RETRIES):
+            driver = None
+            try:
+                driver = get_webdriver(headless=False)
+                task = DownloadReportTask(driver)
+                task.run(contribuyente)
+                break
+            except Exception as e:
+                logger.error(f"Intento {attempt + 1} falló para RUC {contribuyente['ruc']}: {e}")
+            finally:
+                if driver:
+                    driver.quit()
+    logger.info("JOB FINALIZADO: Descarga de reportes para todos")
 
 def start_scheduler():
     initialize_local_db()
@@ -317,52 +382,3 @@ def job_download_all_invoices_monthly():
     for contribuyente in contribuyentes:
         job_download_invoices_for_ruc(contribuyente['ruc'])
     logger.info("JOB MENSUAL FINALIZADO: Descarga de facturas")
-
-
-def job_request_reports_monthly():
-    """Job mensual que solicita reportes T-Registro para todos los contribuyentes."""
-    logger.info("INICIANDO JOB MENSUAL: Solicitud de reportes T-Registro")
-    contribuyentes = get_active_contribuyentes()
-    if not contribuyentes:
-        logger.warning("No hay contribuyentes activos para solicitar reportes.")
-        return
-    
-    tipo_reporte = "6"
-    for contribuyente in contribuyentes:
-        for attempt in range(MAX_TASK_RETRIES):
-            driver = None
-            try:
-                driver = get_webdriver(headless=True)
-                task = RequestReportTask(driver)
-                task.run(contribuyente, tipo_reporte)
-                break
-            except Exception as e:
-                logger.error(f"Intento {attempt + 1} falló para RUC {contribuyente['ruc']}: {e}")
-            finally:
-                if driver:
-                    driver.quit()
-    logger.info("JOB MENSUAL FINALIZADO: Solicitud de reportes T-Registro")
-
-
-def job_download_reports_for_all():
-    """Job que descarga reportes listos para todos los contribuyentes."""
-    logger.info("INICIANDO JOB: Descarga de reportes listos para todos")
-    contribuyentes = get_active_contribuyentes()
-    if not contribuyentes:
-        logger.warning("No hay contribuyentes activos para descargar reportes.")
-        return
-
-    for contribuyente in contribuyentes:
-        for attempt in range(MAX_TASK_RETRIES):
-            driver = None
-            try:
-                driver = get_webdriver(headless=True)
-                task = DownloadReportTask(driver)
-                task.run(contribuyente)
-                break
-            except Exception as e:
-                logger.error(f"Intento {attempt + 1} falló para RUC {contribuyente['ruc']}: {e}")
-            finally:
-                if driver:
-                    driver.quit()
-    logger.info("JOB FINALIZADO: Descarga de reportes para todos")

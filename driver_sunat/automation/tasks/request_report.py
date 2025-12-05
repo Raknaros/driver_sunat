@@ -7,7 +7,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from .base_task import BaseTask
+from .base_task import BaseTask, BusinessRuleException
 from ...database import operations as db
 
 class RequestReportTask(BaseTask):
@@ -26,7 +26,8 @@ class RequestReportTask(BaseTask):
             contribuyente (dict): Datos del contribuyente
             tipo_reporte (str): Tipo de reporte a solicitar (ej: "2", "3", "4")
         """
-        self.logger.info(f"Solicitando reporte tipo {tipo_reporte} para RUC {contribuyente['ruc']}")
+        ruc = contribuyente['ruc']
+        self.logger.info(f"Solicitando reporte tipo {tipo_reporte} para RUC {ruc}")
 
         try:
             # Login
@@ -35,24 +36,27 @@ class RequestReportTask(BaseTask):
                 self.logger.error("Login falló, cancelando solicitud de reporte")
                 return None
 
-            # Navegar al menú de reportes
-            self._navigate_to_reports_section()
+            # Navegar al menú de reportes, pasando el RUC para el manejo de errores
+            self._navigate_to_reports_section(ruc)
 
             # Solicitar el reporte
-            report_id = self._request_report(tipo_reporte, contribuyente['ruc'])
+            report_id = self._request_report(tipo_reporte, ruc)
 
             # Logout
             self.logout()
 
-            self.logger.info(f"Solicitud de reporte tipo {tipo_reporte} completada para RUC {contribuyente['ruc']}")
+            self.logger.info(f"Solicitud de reporte tipo {tipo_reporte} completada para RUC {ruc}")
 
             return report_id
 
+        except BusinessRuleException:
+            # Si es un error de negocio, ya fue logueado. Solo relanzamos para que el scheduler lo atrape.
+            raise
         except Exception as e:
-            self.logger.error(f"Error solicitando reporte para RUC {contribuyente['ruc']}: {e}")
+            self.logger.error(f"Error solicitando reporte para RUC {ruc}: {e}")
             raise
 
-    def _navigate_to_reports_section(self):
+    def _navigate_to_reports_section(self, ruc: str):
         """Navega al menú de Consultar y Reportes usando IDs específicos."""
         self.logger.debug("Navegando a sección de reportes")
 
@@ -93,9 +97,9 @@ class RequestReportTask(BaseTask):
                 error_msg = self.driver.find_element(By.CSS_SELECTOR, "p.error").text
                 if "El contribuyente no ha sido registrado como Empleador" in error_msg:
                     # Registrar observación
-                    db.add_observation(ruc, f"Error al solicitar reporte: {error_msg}", "PENDIENTE")
+                    db.add_observation(ruc, f"No es empleador en T-Registro", "DETERMINANTE", "PENDIENTE")
                     self.logger.warning(f"Contribuyente {ruc} no registrado como empleador. Observación registrada.")
-                    raise Exception(f"Contribuyente no registrado como empleador: {error_msg}")
+                    raise BusinessRuleException(f"Contribuyente no registrado como empleador: {error_msg}")
             except NoSuchElementException:
                 # No hay error, continuar
                 pass
@@ -107,6 +111,8 @@ class RequestReportTask(BaseTask):
 
             self.logger.debug("Navegación a sección de reportes completada")
 
+        except BusinessRuleException:
+            raise # No envolver el error de negocio, solo relanzarlo
         except Exception as e:
             self.logger.error(f"Error en navegación a reportes: {e}")
             raise

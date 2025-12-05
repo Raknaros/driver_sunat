@@ -5,7 +5,9 @@ from .scheduler import (
     job_check_all_mailboxes, 
     job_check_mailbox_for_ruc,
     run_sire_proposals_request, 
-    run_sire_status_check
+    run_sire_status_check,
+    job_request_reports_monthly,
+    job_request_report_for_ruc # Necesitaremos crear esta función
 )
 from .database.operations import (
     initialize_local_db, 
@@ -85,13 +87,26 @@ def download_invoices(ruc, start_date, end_date):
     click.echo(click.style(f"Descargando facturas para RUC {ruc} ({start_date} - {end_date})", fg="blue"))
     # ... (la lógica interna no cambia)
     
-@tasks.command()
-@click.option('--ruc', required=True, help='RUC del contribuyente')
-@click.option('--tipo-reporte', default="6", help='Tipo de reporte a solicitar (default: 6 - Prestadores de servicios)')
-def request_report(ruc, tipo_reporte):
-    """Solicita un reporte T-Registro para un RUC específico."""
-    click.echo(click.style(f"Solicitando reporte tipo {tipo_reporte} para RUC {ruc}", fg="blue"))
-    # ... (la lógica interna no cambia)
+@tasks.command(name="request-report")
+@click.option('--ruc', help='RUC específico a procesar.')
+@click.option('--all', 'process_all', is_flag=True, help='Procesar todos los contribuyentes activos.')
+@click.option('--tipo-reporte', default="6", help='Tipo de reporte a solicitar (default: 6 - Prestadores de servicios).')
+def request_report_command(ruc, process_all, tipo_reporte):
+    """Solicita reportes T-Registro para uno o todos los contribuyentes."""
+    if not ruc and not process_all:
+        raise click.UsageError("Debe especificar --ruc o --all.")
+    if ruc and process_all:
+        raise click.UsageError("No puede usar --ruc y --all al mismo tiempo.")
+
+    if ruc:
+        click.echo(click.style(f"Solicitando reporte tipo {tipo_reporte} para RUC {ruc}", fg="blue"))
+        job_request_report_for_ruc(ruc, tipo_reporte)
+    elif process_all:
+        click.echo(click.style(f"Solicitando reporte tipo {tipo_reporte} para TODOS los contribuyentes activos...", fg="blue"))
+        job_request_reports_monthly(tipo_reporte)
+    
+    click.echo(click.style("Tarea de solicitud de reportes finalizada.", fg="green"))
+
 
 @tasks.command()
 @click.option('--ruc', help='RUC específico (opcional, por defecto todos los activos)')

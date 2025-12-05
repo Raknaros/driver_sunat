@@ -2,7 +2,7 @@
 import sqlite3
 import psycopg2
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from ..config import config
 from ..security import encrypt_password, decrypt_password
 
@@ -134,6 +134,65 @@ def get_active_contribuyentes():
     conn = get_local_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT ruc, user_sol, password_sol_encrypted FROM contribuyentes WHERE is_active = 1")
+    rows = cursor.fetchall()
+    conn.close()
+
+    key = config.ENCRYPTION_KEY.encode('utf-8')
+    contribuyentes = []
+    for row in rows:
+        try:
+            decrypted_pass = decrypt_password(row['password_sol_encrypted'], key)
+            contribuyentes.append({
+                "ruc": row['ruc'],
+                "user_sol": row['user_sol'],
+                "password_sol": decrypted_pass
+            })
+        except Exception as e:
+            print(f"ADVERTENCIA: No se pudo descifrar la contraseña para el RUC {row['ruc']}. Error: {e}")
+    return contribuyentes
+
+def get_active_contribuyentes_employer():
+    """
+    Obtiene una lista de contribuyentes activos que no han sido marcados
+    como 'No es empleador' en los últimos 25 días.
+
+    Este enfoque híbrido mejora la eficiencia al evitar reintentos constantes
+    en casos conocidos, pero permite una re-verificación periódica
+    (cada 25 días) en caso de que el estado del contribuyente cambie.
+
+    Returns:
+        list[dict]: Una lista de diccionarios, donde cada diccionario
+                    representa a un contribuyente apto.
+    """
+    conn = get_local_db_connection()
+    cursor = conn.cursor()
+
+    # 1. Calcular la fecha límite (hace 25 días)
+    # SQLite no tiene funciones de fecha complejas, así que lo calculamos en Python.
+    cutoff_date = datetime.now() - timedelta(days=25)
+    cutoff_date_str = cutoff_date.isoformat()
+
+    # 2. Escribir la consulta SQL usando LEFT JOIN para un rendimiento óptimo
+    # y la condición de fecha para el bloqueo temporal.
+    # Un contribuyente es seleccionado si:
+    #   a) Está activo.
+    #   b) No tiene ninguna observación de 'No es empleador' (o.ruc IS NULL), O
+    #   c) La observación que tiene es más antigua que la fecha de corte.
+    query = """
+            SELECT c.ruc, \
+                   c.user_sol, \
+                   c.password_sol_encrypted
+            FROM contribuyentes c \
+                     LEFT JOIN (SELECT ruc, MAX(fecha_observacion) as last_observation_date \
+                                FROM observaciones \
+                                WHERE mensaje LIKE 'No es empleador%' \
+                                GROUP BY ruc) o ON c.ruc = o.ruc
+            WHERE c.is_active = 1
+              AND (o.ruc IS NULL OR o.last_observation_date < ?);
+            """
+
+    # 3. Ejecutar la consulta pasando la fecha de corte como parámetro seguro
+    cursor.execute(query, (cutoff_date_str,))
     rows = cursor.fetchall()
     conn.close()
 
