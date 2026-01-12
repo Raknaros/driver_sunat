@@ -1,256 +1,220 @@
-# Driver SUNAT
+# Driver SUNAT - Financial Automation System
 
-Un sistema de automatización para interactuar con el portal de la Superintendencia Nacional de Aduanas y de Administración Tributaria (SUNAT) de Perú. Este proyecto permite automatizar tareas como la revisión del buzón electrónico, descarga de facturas y sincronización de datos utilizando Selenium WebDriver y bases de datos locales y centrales.
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)](https://www.python.org/)
+[![Selenium](https://img.shields.io/badge/Selenium-4.0%2B-green?style=for-the-badge&logo=selenium)](https://www.selenium.dev/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14%2B-336791?style=for-the-badge&logo=postgresql)](https://www.postgresql.org/)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
-## Características
+[English Version](#english-version) | [Versión en Español](#versión-en-español)
 
-- **Automatización de Login**: Manejo seguro de autenticación en el portal SOL de SUNAT con soporte para múltiples contribuyentes.
-- **Revisión de Buzón Electrónico**: Automatización completa para acceder y sincronizar mensajes del buzón electrónico de SUNAT.
-- **Descarga de Facturas**: Framework preparado para descargar facturas en rangos de fechas específicos (implementación en progreso).
-- **Programación de Tareas**: Uso de APScheduler para ejecutar tareas automáticamente en horarios definidos.
-- **Gestión de Bases de Datos**: Integración con base de datos local (SQLite) y central (PostgreSQL) para almacenamiento y sincronización de datos.
-- **Seguridad**: Cifrado de contraseñas utilizando Fernet (cryptography library).
-- **Interfaz de Línea de Comandos**: CLI intuitiva construida con Click para facilitar el uso y la configuración.
+---
 
-## Instalación
+<a name="english-version"></a>
+## 🇬🇧 English Version
 
-### Prerrequisitos
+### Overview
+**Driver SUNAT** is a high-performance financial automation system designed to interact with the Peruvian Tax Administration (SUNAT) portal. Developed by a Software Engineer with a background in Economics and over 8 years of accounting experience, this tool bridges the gap between raw tax data and actionable financial intelligence.
 
-- Python 3.8 o superior
-- Google Chrome instalado (para Selenium WebDriver)
-- Acceso a una base de datos PostgreSQL (para la BD central)
+It automates critical accounting workflows such as electronic mailbox monitoring, invoice retrieval, and tax report generation (T-Registro, SIRE), ensuring compliance and efficiency for accounting firms and enterprises managing multiple tax IDs (RUCs).
 
-### Pasos de Instalación
+### Key Features
+*   **Robust Automation Engine**: Built on **Selenium WebDriver** with a custom `BaseTask` architecture that handles login sessions, retries, and error recovery gracefully.
+*   **Multi-Tenant Support**: capable of managing hundreds of taxpayers (RUCs) simultaneously, with secure credential management.
+*   **Financial Data Pipeline**:
+    *   **Electronic Mailbox**: Scrapes, parses, and synchronizes official SUNAT notifications to a central database.
+    *   **SIRE Integration**: Automates the request and download of Sales and Purchases proposals (Sistema Integrado de Registros Electrónicos).
+    *   **T-Registro Reports**: Automates the request and retrieval of employee and service provider reports.
+*   **Hybrid Database Architecture**:
+    *   **Local Cache (SQLite)**: For high-speed session management and temporary data storage.
+    *   **Central Warehouse (PostgreSQL)**: For persistent storage, analytics, and integration with ERP systems.
+*   **Enterprise Scheduler**: Powered by **APScheduler**, it orchestrates tasks like daily mailbox checks (8:00 AM) and monthly tax report generation.
+*   **Security First**: Implements **Fernet (symmetric encryption)** for safeguarding sensitive tax credentials.
 
-1. **Clona el repositorio**:
-   ```bash
-   git clone <url-del-repositorio>
-   cd driver_sunat
-   ```
+### Tech Stack
+*   **Core**: Python 3.10+
+*   **Automation**: Selenium WebDriver, WebDriver Manager
+*   **Data Processing**: Pandas, NumPy
+*   **Scheduling**: APScheduler (BlockingScheduler)
+*   **CLI**: Click (Command Line Interface)
+*   **Database**: PostgreSQL (psycopg2), SQLite
+*   **Security**: Cryptography (Fernet)
 
-2. **Instala las dependencias**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Installation & Setup
 
-3. **Configura las variables de entorno**:
-   Crea un archivo `.env` en la raíz del proyecto con las siguientes variables:
-   ```
-   ENCRYPTION_KEY=<clave-de-cifrado-segura>
-   PG_HOST=<host-de-postgresql>
-   PG_PORT=5432
-   PG_DBNAME=<nombre-de-la-base-de-datos>
-   PG_USER=<usuario-postgresql>
-   PG_PASSWORD=<contraseña-postgresql>
-   ```
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/your-repo/driver_sunat.git
+    cd driver_sunat
+    ```
 
-   **Nota**: La `ENCRYPTION_KEY` debe ser una cadena segura de 32 caracteres (o generada con `os.urandom(32).hex()`).
+2.  **Install dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-## Configuración
+3.  **Environment Configuration**:
+    Create a `.env` file in the root directory:
+    ```env
+    ENCRYPTION_KEY=your_32_byte_base64_key
+    PG_HOST=localhost
+    PG_PORT=5432
+    PG_DBNAME=financial_db
+    PG_USER=admin
+    PG_PASSWORD=secret
+    ```
 
-### Inicialización de la Base de Datos
+4.  **Initialize Local Database**:
+    ```bash
+    python main.py init_db
+    ```
 
-Antes de usar el sistema, inicializa la base de datos local:
+### Usage
 
-```bash
-python main.py init_db
-```
+The system is controlled via a CLI entry point `main.py`.
 
-Este comando crea las tablas necesarias en SQLite local.
+*   **Start the Scheduler (Production Mode)**:
+    ```bash
+    python main.py scheduler
+    ```
+    *Runs background jobs for mailbox checks, SIRE reports, and data synchronization.*
 
-### Sincronización de Clientes
+*   **Manual Task Execution**:
+    ```bash
+    # Check mailbox for a specific Tax ID (RUC)
+    python main.py tasks check-mailbox --ruc 20123456789
 
-Para sincronizar los contribuyentes desde la base de datos central:
+    # Request SIRE Proposals (Sales/Purchases)
+    python main.py tasks sire-request --periodo 202310
 
-```bash
-python main.py scheduler
-```
+    # Download T-Registro Reports
+    python main.py tasks download-reports --ruc 20123456789
+    ```
 
-Esto iniciará el programador que sincroniza clientes diariamente a la 1:00 AM.
+---
 
-## Uso
+<a name="versión-en-español"></a>
+## 🇵🇪 Versión en Español
 
-### Interfaz de Línea de Comandos
+### Descripción General
+**Driver SUNAT** es un sistema de automatización financiera de alto rendimiento diseñado para interactuar con el portal de la SUNAT (Superintendencia Nacional de Aduanas y de Administración Tributaria). Desarrollado con una perspectiva dual de Ingeniería de Software y Economía, esta herramienta transforma datos tributarios crudos en información financiera procesable.
 
-El proyecto incluye varios comandos CLI accesibles a través de `python main.py`:
+Automatiza flujos de trabajo contables críticos como el monitoreo del Buzón Electrónico, la descarga de comprobantes de pago y la generación de reportes tributarios (SIRE, T-Registro), asegurando el cumplimiento normativo y la eficiencia operativa para estudios contables y empresas.
 
-- `scheduler`: Inicia el programador de tareas en modo bloqueante.
-- `init_db`: Inicializa o reinicializa la base de datos local.
-- `tasks check_mailbox`: Ejecuta manualmente la revisión del buzón para todos los contribuyentes activos.
+### Características Principales
+*   **Motor de Automatización Robusto**: Construido sobre **Selenium WebDriver** con una arquitectura `BaseTask` personalizada que maneja sesiones de login, reintentos automáticos y recuperación de errores.
+*   **Soporte Multi-Empresa**: Capacidad para gestionar cientos de contribuyentes (RUCs) simultáneamente, con gestión segura de credenciales (Clave SOL).
+*   **Pipeline de Datos Financieros**:
+    *   **Buzón Electrónico**: Extrae, procesa y sincroniza notificaciones oficiales hacia una base de datos central.
+    *   **Integración SIRE**: Automatiza la solicitud y descarga de propuestas de Ventas y Compras del Sistema Integrado de Registros Electrónicos.
+    *   **Reportes T-Registro**: Automatiza la solicitud y recuperación de reportes de planilla y locadores de servicios.
+*   **Arquitectura de Base de Datos Híbrida**:
+    *   **Caché Local (SQLite)**: Para gestión de sesiones de alta velocidad y almacenamiento temporal.
+    *   **Almacén Central (PostgreSQL)**: Para persistencia, análisis financiero e integración con ERPs.
+*   **Programador Empresarial**: Impulsado por **APScheduler**, orquesta tareas como la revisión diaria de buzones (8:00 AM) y la generación mensual de reportes.
+*   **Seguridad**: Implementa cifrado **Fernet** para proteger las credenciales tributarias sensibles.
 
-### Ejemplos de Uso
+### Stack Tecnológico
+*   **Core**: Python 3.10+
+*   **Automatización**: Selenium WebDriver, WebDriver Manager
+*   **Procesamiento de Datos**: Pandas, NumPy
+*   **Scheduling**: APScheduler (BlockingScheduler)
+*   **CLI**: Click (Interfaz de Línea de Comandos)
+*   **Base de Datos**: PostgreSQL (psycopg2), SQLite
+*   **Seguridad**: Cryptography (Fernet)
 
-1. **Iniciar el programador automático**:
-   ```bash
-   python main.py scheduler
-   ```
-   Esto ejecutará tareas programadas:
-   - Sincronización de clientes (1:00 AM diaria)
-   - Revisión de buzones (8:00 AM diaria)
-   - Descarga de facturas (día 1 del mes, 2:00 AM)
-   - Solicitud de reportes T-Registro (día 1 del mes, 3:00 AM)
-   - Descarga de reportes listos (9:00 AM diaria)
+### Instalación y Configuración
 
-2. **Revisar buzones manualmente**:
-   ```bash
-   python main.py tasks check-mailbox
-   # Para todos los contribuyentes activos
+1.  **Clonar el repositorio**:
+    ```bash
+    git clone https://github.com/tu-repo/driver_sunat.git
+    cd driver_sunat
+    ```
 
-   python main.py tasks check-mailbox --ruc 20606283858
-   # Para un RUC específico
-   ```
+2.  **Instalar dependencias**:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-3. **Descargar facturas manualmente**:
-   ```bash
-   python main.py tasks download-invoices --ruc 20606283858 --start-date 01/10/2025 --end-date 31/10/2025
-   ```
+3.  **Configuración de Entorno**:
+    Crear un archivo `.env` en la raíz del proyecto:
+    ```env
+    ENCRYPTION_KEY=tu_clave_base64_de_32_bytes
+    PG_HOST=localhost
+    PG_PORT=5432
+    PG_DBNAME=financial_db
+    PG_USER=admin
+    PG_PASSWORD=secreto
+    ```
 
-4. **Solicitar reportes T-Registro**:
-   ```bash
-   python main.py tasks request-report --ruc 20606283858 --tipo-reporte 6
-   # Tipo 6: Reporte de prestadores de servicios (default)
-   ```
+4.  **Inicializar Base de Datos Local**:
+    ```bash
+    python main.py init_db
+    ```
 
-5. **Descargar reportes listos**:
-   ```bash
-   python main.py tasks download-reports --ruc 20606283858
-   # Para un RUC específico
+### Uso
 
-   python main.py tasks download-reports
-   # Para todos los RUC activos
-   ```
+El sistema se controla a través del CLI `main.py`.
 
-4. **Test de captura de buzón (imprimir en consola)**:
-   ```bash
-   python test_buzon.py
-   ```
-   Esto ejecuta un test que captura los mensajes del buzón e imprime en consola el formato exacto que se usaría para subir a la base de datos, sin guardar nada.
+*   **Iniciar el Programador (Modo Producción)**:
+    ```bash
+    python main.py scheduler
+    ```
+    *Ejecuta tareas en segundo plano para revisión de buzones, reportes SIRE y sincronización.*
 
-5. **Test de solicitud de reportes**:
-   ```bash
-   python test_request_report.py
-   ```
-   Solicita un reporte T-Registro e imprime el ID del reporte y ticket generado para verificar que el flujo funciona correctamente.
+*   **Ejecución Manual de Tareas**:
+    ```bash
+    # Revisar buzón para un RUC específico
+    python main.py tasks check-mailbox --ruc 20123456789
 
-3. **Ejecutar scraping básico** (desde `scrapingavanzado.txt`):
-   ```python
-   from scrapingavanzado import SunatScraper
+    # Solicitar Propuestas SIRE (Ventas/Compras)
+    python main.py tasks sire-request --periodo 202310
 
-   scraper = SunatScraper()
-   result = scraper.run_full_process(RUC, USUARIO, CLAVE)
-   ```
+    # Descargar Reportes T-Registro
+    python main.py tasks download-reports --ruc 20123456789
+    ```
 
-### Tareas Programadas
-
-El scheduler ejecuta automáticamente:
-- **Sincronización de clientes**: Todos los días a las 1:00 AM.
-- **Revisión de buzones**: Todos los días a las 8:00 AM para todos los contribuyentes activos.
-
-## Arquitectura del Sistema
+### Arquitectura del Sistema / System Architecture
 
 ```mermaid
 graph TD
-    A[CLI / Scheduler] --> B[BaseTask]
-    B --> C[Login/Logout con Reintentos]
-    B --> D[Task Específica]
+    subgraph "Core Controller"
+        CLI[CLI (Click)] --> Scheduler[APScheduler]
+        Scheduler --> TaskManager[Task Manager]
+    end
 
-    D --> E[CheckMailboxTask]
-    D --> F[DownloadInvoicesTask]
+    subgraph "Automation Layer"
+        TaskManager --> BaseTask[Base Task (Selenium)]
+        BaseTask --> Login[Auth Module]
+        BaseTask --> Mailbox[Mailbox Scraper]
+        BaseTask --> SIRE[SIRE API Client]
+        BaseTask --> TReg[T-Registro Bot]
+    end
 
-    E --> G[Sincronizar Mensajes con BD]
-    F --> H[Descargar y Verificar Archivos]
+    subgraph "Data Layer"
+        LocalDB[(SQLite Local Cache)]
+        CentralDB[(PostgreSQL Warehouse)]
+        
+        Mailbox --> LocalDB
+        SIRE --> LocalDB
+        TReg --> LocalDB
+        
+        LocalDB <--> SyncService[Sync Service]
+        SyncService <--> CentralDB
+    end
 
-    B --> I[Database Operations]
-    I --> J[BD Local SQLite]
-    I --> K[BD Central PostgreSQL]
-
-    B --> L[Logging System]
-    B --> M[Error Handling & Recovery]
-
-    A --> N[Config System]
-    N --> O[Horarios Programados]
-    N --> P[Credenciales Cifradas]
-
-    S[Scheduler Jobs] --> T[Sincronización Diaria 1:00 AM]
-    S --> U[Revisión Buzón Diaria 8:00 AM]
-    S --> V[Descarga Facturas Mensual Día 1, 2:00 AM]
-    S --> W[Solicitud Reportes T-Registro Día 1, 3:00 AM]
-    S --> X[Descarga Reportes Diaria 9:00 AM]
+    subgraph "External"
+        SUNAT[SUNAT Portal / API]
+        Login --> SUNAT
+        Mailbox --> SUNAT
+        SIRE --> SUNAT
+    end
 ```
 
-## Estructura del Proyecto
+### Contact / Contacto
 
-```
-driver_sunat/
-├── main.py                          # Punto de entrada principal con setup de logging
-├── requirements.txt                 # Dependencias del proyecto
-├── scrapingavanzado.txt             # Código de ejemplo para scraping básico
-├── test_buzon.py                    # Script de test para captura de buzón
-├── test_request_report.py           # Script de test para solicitud de reportes
-├── driver_sunat/                    # Módulo principal
-│   ├── __init__.py
-│   ├── cli.py                       # Definición de comandos CLI con opciones --ruc
-│   ├── config.py                    # Configuración centralizada con SCHEDULE_CONFIG y LOG_CONFIG
-│   ├── scheduler.py                 # Programador de tareas mejorado con logging
-│   ├── security.py                  # Funciones de cifrado/descifrado
-│   ├── automation/                  # Módulos de automatización
-│   │   ├── __init__.py
-│   │   ├── driver_manager.py        # Configuración de Selenium WebDriver
-│   │   └── tasks/                   # Tareas específicas
-│   │       ├── __init__.py
-│       │   ├── base_task.py         # Clase base con login/logout y reintentos
-│       │   ├── check_mailbox.py     # Tarea de revisión de buzón con logging
-│       │   ├── download_invoices.py # Tarea completa de descarga de facturas
-│       │   ├── request_report.py    # Tarea de solicitud de reportes T-Registro
-│       │   └── download_report.py   # Tarea de descarga de reportes listos
-│   └── database/                    # Operaciones de base de datos
-│       ├── __init__.py
-│       └── operations.py            # Funciones para BD local y central
-├── logs/                            # Directorio de logs (creado automáticamente)
-│   └── driver_sunat.log
-├── data/                            # Directorio de datos (creado automáticamente)
-│   ├── sunat_data.db                # Base de datos local SQLite
-│   └── downloads/                   # Archivos descargados
-└── tests/                           # Directorio de pruebas
-    └── __init__.py
-```
+**Developer**: Giusseppe Marchan
+**Role**: Economist & Software Engineer
+**Specialization**: Financial Automation & Tax Compliance Systems
 
-## Dependencias
-
-- `selenium`: Para automatización web
-- `pandas`: Para manipulación de datos
-- `python-dotenv`: Para gestión de variables de entorno
-- `apscheduler`: Para programación de tareas
-- `click`: Para interfaz de línea de comandos
-- `webdriver-manager`: Para gestión automática de WebDriver
-- `psycopg2-binary`: Para conexión a PostgreSQL
-- `cryptography`: Para cifrado de contraseñas
-
-## Seguridad
-
-- Las contraseñas se almacenan cifradas en la base de datos local utilizando Fernet.
-- Se recomienda usar una `ENCRYPTION_KEY` única y segura.
-- El sistema maneja sesiones web de manera segura, cerrando sesiones después de cada tarea.
-
-## Contribución
-
-1. Fork el proyecto
-2. Crea una rama para tu feature (`git checkout -b feature/nueva-funcionalidad`)
-3. Commit tus cambios (`git commit -am 'Agrega nueva funcionalidad'`)
-4. Push a la rama (`git push origin feature/nueva-funcionalidad`)
-5. Abre un Pull Request
-
-## Licencia
-
-Este proyecto está bajo la Licencia MIT. Ver el archivo `LICENSE` para más detalles.
-
-## Notas Adicionales
-
-- El proyecto está diseñado para operar en entornos Linux/Windows con Chrome.
-- Asegúrate de que Chrome esté actualizado para compatibilidad con WebDriver.
-- Para entornos de producción, considera usar contenedores Docker para aislamiento.
-- La tarea de descarga de facturas está en desarrollo; actualmente solo tiene la estructura base.
-
-## Soporte
-
-Para soporte o preguntas, por favor abre un issue en el repositorio del proyecto.
+---
+*Note: This software is not affiliated with SUNAT. Use responsibly and in accordance with local regulations.*
