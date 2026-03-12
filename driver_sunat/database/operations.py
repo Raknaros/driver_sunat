@@ -590,7 +590,8 @@ def sync_otras_credenciales_from_central_db():
         print("Sincronización fallida.")
         return
 
-    query = "SELECT ruc, tipo, usuario, contrasena, credencial3, observaciones FROM priv.otras_credenciales"
+    # Se cambia la consulta para traer 'notas' en lugar de 'observaciones'
+    query = "SELECT ruc, tipo, usuario, contrasena, credencial3, notas FROM priv.otras_credenciales"
     try:
         pg_cursor = pg_conn.cursor()
         pg_cursor.execute(query)
@@ -606,10 +607,17 @@ def sync_otras_credenciales_from_central_db():
     local_conn = get_local_db_connection()
     local_cursor = local_conn.cursor()
 
+    # Limpieza total de la tabla local para evitar duplicados
+    local_cursor.execute("DELETE FROM otras_credenciales")
+    print("Tabla local 'otras_credenciales' limpiada antes de la inserción.")
+
     for cred in creds:
+        # Aquí 'observaciones' en la variable local contendrá el valor de 'notas' de la BD central
         ruc, tipo, usuario, contrasena, credencial3, observaciones = cred
+        
+        # Se inserta en la columna 'observaciones' de SQLite el valor que vino de 'notas'
         local_cursor.execute("""
-        INSERT OR REPLACE INTO otras_credenciales (ruc, tipo, usuario, contrasena, credencial3, observaciones)
+        INSERT INTO otras_credenciales (ruc, tipo, usuario, contrasena, credencial3, observaciones)
         VALUES (?, ?, ?, ?, ?, ?)
         """, (str(ruc), tipo, usuario, contrasena, credencial3, observaciones))
 

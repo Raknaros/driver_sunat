@@ -43,10 +43,11 @@ def _generate_period_range(start_period: str, end_period: str) -> list[str]:
 
 # --- Funciones de Tareas Individuales ---
 
-def run_sire_proposals_request(periodo_unico=None, desde_periodo=None, hasta_periodo=None):
+def run_sire_proposals_request(periodo_unico=None, desde_periodo=None, hasta_periodo=None, ruc=None):
     """
     Solicita propuestas SIRE para todos los contribuyentes con credenciales.
     Puede procesar un periodo único, un rango, o el mes anterior por defecto.
+    Permite filtrar por un RUC específico.
     """
     logger.info("INICIANDO TAREA: Solicitud de propuestas SIRE")
 
@@ -68,6 +69,14 @@ def run_sire_proposals_request(periodo_unico=None, desde_periodo=None, hasta_per
         return
 
     contribuyentes = get_active_contribuyentes_with_sire_creds()
+    
+    # Filtrar por RUC si se especifica
+    if ruc:
+        contribuyentes = [c for c in contribuyentes if c['ruc'] == ruc]
+        if not contribuyentes:
+            logger.error(f"RUC {ruc} no encontrado o sin credenciales SIRE válidas.")
+            return
+
     if not contribuyentes:
         logger.warning("No hay contribuyentes activos con credenciales SIRE válidas para procesar.")
         return
@@ -78,20 +87,20 @@ def run_sire_proposals_request(periodo_unico=None, desde_periodo=None, hasta_per
     tipos = ['ventas', 'compras']
 
     for contribuyente in contribuyentes:
-        ruc = contribuyente['ruc']
-        if ruc not in sire_clients:
-            sire_clients[ruc] = SireClient(logger, ruc)
-        client = sire_clients[ruc]
+        current_ruc = contribuyente['ruc']
+        if current_ruc not in sire_clients:
+            sire_clients[current_ruc] = SireClient(logger, current_ruc)
+        client = sire_clients[current_ruc]
 
         for tipo in tipos:
             for periodo in periods_to_process:
                 try:
-                    task = SireRequestTask(logger, ruc, client=client)
+                    task = SireRequestTask(logger, current_ruc, client=client)
                     task.run(contribuyente, tipo, periodo=periodo)
                 except Exception as e:
-                    error_msg = f"Error solicitando propuesta SIRE {tipo} para RUC {ruc} en periodo {periodo}: {e}"
+                    error_msg = f"Error solicitando propuesta SIRE {tipo} para RUC {current_ruc} en periodo {periodo}: {e}"
                     logger.error(error_msg)
-                    db.add_observation(ruc, error_msg, "LOCAL")
+                    db.add_observation(current_ruc, error_msg, "LOCAL")
     
     logger.info(f"Tarea de solicitud de propuestas SIRE finalizada.")
 

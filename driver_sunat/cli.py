@@ -131,7 +131,8 @@ def download_reports_command(ruc):
 @click.option('--periodo', 'periodo_unico', help="Periodo único a solicitar (formato YYYYMM).")
 @click.option('--desde', 'desde_periodo', help="Periodo inicial del rango a solicitar (formato YYYYMM).")
 @click.option('--hasta', 'hasta_periodo', help="Periodo final del rango a solicitar (formato YYYYMM).")
-def sire_proposals_request_command(periodo_unico, desde_periodo, hasta_periodo):
+@click.option('--ruc', help="RUC específico a procesar (opcional).")
+def sire_proposals_request_command(periodo_unico, desde_periodo, hasta_periodo, ruc):
     """
     Solicita propuestas SIRE (Ventas/Compras) para todos los contribuyentes activos.
     Puede solicitar un periodo, un rango o el mes anterior por defecto.
@@ -144,7 +145,8 @@ def sire_proposals_request_command(periodo_unico, desde_periodo, hasta_periodo):
         run_sire_proposals_request(
             periodo_unico=periodo_unico,
             desde_periodo=desde_periodo,
-            hasta_periodo=hasta_periodo
+            hasta_periodo=hasta_periodo,
+            ruc=ruc
         )
         click.echo(click.style("Solicitud de propuestas SIRE completada.", fg="green"))
     except Exception as e:
