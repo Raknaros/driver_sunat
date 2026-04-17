@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 from datetime import datetime
 from .sire_client import SireClient
 from ...database import operations as db
@@ -34,17 +35,25 @@ class SireDownloadTask:
                 download_params
             )
 
-            if file_path:
-                # Actualizar el estado en la base de datos
+            if file_path and os.path.exists(file_path):
+                # Usar el nombre real del archivo en disco (puede diferir del original si fue renombrado)
+                nom_archivo_final = os.path.basename(file_path)
+                file_size = os.path.getsize(file_path)
+                self.logger.info(
+                    f"Archivo verificado en disco: '{file_path}' | Tamaño: {file_size} bytes"
+                )
                 db.update_sire_status(
                     sire_id,
                     'DESCARGADO',
-                    nom_archivo,
+                    nom_archivo_final,
                     datetime.now().isoformat()
                 )
                 self.logger.info(f"Reporte SIRE ID {sire_id} marcado como DESCARGADO.")
             else:
-                self.logger.error(f"La descarga del reporte SIRE ID {sire_id} falló, no se recibió una ruta de archivo.")
+                self.logger.error(
+                    f"La descarga del reporte SIRE ID {sire_id} falló: "
+                    f"no se recibió ruta o el archivo no existe en disco (path={file_path})."
+                )
                 db.update_sire_status(sire_id, 'ERROR')
 
         except Exception as e:

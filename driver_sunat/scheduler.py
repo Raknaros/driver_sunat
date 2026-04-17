@@ -101,6 +101,9 @@ def run_sire_proposals_request(periodo_unico=None, desde_periodo=None, hasta_per
                     error_msg = f"Error solicitando propuesta SIRE {tipo} para RUC {current_ruc} en periodo {periodo}: {e}"
                     logger.error(error_msg)
                     db.add_observation(current_ruc, error_msg, "LOCAL")
+                finally:
+                    # Pausa para evitar colisión de nombres de archivo (SUNAT usa timestamp en el nombre)
+                    time.sleep(1)
     
     logger.info(f"Tarea de solicitud de propuestas SIRE finalizada.")
 
@@ -145,9 +148,13 @@ def run_sire_status_check():
                 if estado == 'LISTO':
                     logger.info(f"Reporte SIRE ID {report['id']} (RUC {ruc}) está LISTO. Iniciando descarga.")
                     download_params = status_result.get('params')
-                    
+                    # Sobreescribir perTributario con el periodo de la BD (garantiza formato YYYYMM correcto)
+                    download_params['perTributario'] = report['periodo']
+
                     download_task = SireDownloadTask(logger, ruc, client=client)
                     download_task.run(contribuyente, report['id'], download_params)
+                    # Pausa entre descargas consecutivas para evitar throttling de la API de SUNAT
+                    time.sleep(2)
 
                 elif estado == 'ERROR':
                      logger.error(f"Reporte SIRE ID {report['id']} (RUC {ruc}) tiene estado de ERROR en SUNAT.")

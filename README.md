@@ -22,7 +22,7 @@ It automates critical accounting workflows such as electronic mailbox monitoring
 *   **Multi-Tenant Support**: capable of managing hundreds of taxpayers (RUCs) simultaneously, with secure credential management.
 *   **Financial Data Pipeline**:
     *   **Electronic Mailbox**: Scrapes, parses, and synchronizes official SUNAT notifications to a central database.
-    *   **SIRE Integration**: Automates the request and download of Sales and Purchases proposals (Sistema Integrado de Registros Electrónicos).
+    *   **SIRE Integration**: Automates the request and download of Sales and Purchases proposals (Sistema Integrado de Registros Electrónicos). Includes reliable download verification (Content-Type validation, disk existence check) and automatic filename correction for Sales files to prevent period collisions caused by SUNAT's timestamp-based naming.
     *   **T-Registro Reports**: Automates the request and retrieval of employee and service provider reports.
 *   **Hybrid Database Architecture**:
     *   **Local Cache (SQLite)**: For high-speed session management and temporary data storage.
@@ -105,7 +105,7 @@ Automatiza flujos de trabajo contables críticos como el monitoreo del Buzón El
 *   **Soporte Multi-Empresa**: Capacidad para gestionar cientos de contribuyentes (RUCs) simultáneamente, con gestión segura de credenciales (Clave SOL).
 *   **Pipeline de Datos Financieros**:
     *   **Buzón Electrónico**: Extrae, procesa y sincroniza notificaciones oficiales hacia una base de datos central.
-    *   **Integración SIRE**: Automatiza la solicitud y descarga de propuestas de Ventas y Compras del Sistema Integrado de Registros Electrónicos.
+    *   **Integración SIRE**: Automatiza la solicitud y descarga de propuestas de Ventas y Compras del Sistema Integrado de Registros Electrónicos. Incluye verificación confiable de descarga (validación de Content-Type, comprobación de existencia en disco) y corrección automática del nombre de archivos de Ventas para evitar colisiones de periodos causadas por el nombrado basado en timestamp de SUNAT.
     *   **Reportes T-Registro**: Automatiza la solicitud y recuperación de reportes de planilla y locadores de servicios.
 *   **Arquitectura de Base de Datos Híbrida**:
     *   **Caché Local (SQLite)**: Para gestión de sesiones de alta velocidad y almacenamiento temporal.

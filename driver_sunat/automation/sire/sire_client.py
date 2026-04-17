@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import os
+import re
 import requests
 from datetime import datetime, timedelta
 from ...config import config
@@ -173,7 +175,7 @@ class SireClient:
         """
         libro = 'rvierce'
         url = f"https://api-sire.sunat.gob.pe/v1/contribuyente/migeigv/libros/{libro}/gestionprocesosmasivos/web/masivo/archivoreporte"
-        
+
         # Asegurarse de tener un token
         if not self.token:
             self._get_token(ruc, sol_user, sol_pass)
@@ -183,11 +185,45 @@ class SireClient:
             response = requests.get(url, headers=headers, params=download_params, timeout=60)
             response.raise_for_status()
 
+            content_type = response.headers.get('Content-Type', '')
+            content_size = len(response.content)
+
+            # SUNAT a veces devuelve HTTP 200 con un cuerpo JSON de error en lugar del archivo.
+            # Un archivo legítimo (ZIP, CSV, XLSX) nunca tiene Content-Type application/json.
+            if 'application/json' in content_type:
+                error_body = response.text[:500]
+                self.logger.error(
+                    f"SUNAT devolvió JSON en lugar del archivo para '{download_params.get('nomArchivoReporte')}'. "
+                    f"Body: {error_body}"
+                )
+                raise ValueError(f"Respuesta inesperada de SUNAT (Content-Type JSON): {error_body}")
+
             nom_archivo = download_params.get('nomArchivoReporte')
-            file_path = f"{config.DOWNLOAD_PATH}/{nom_archivo}"
+
+            # Archivos de ventas SIRE comienzan con 'LE'. SUNAT genera el nombre con el timestamp
+            # del momento de descarga, lo que provoca colision entre periodos distintos.
+            # Se reemplaza ese timestamp por el periodo tributario real antes de escribir en disco.
+            nom_archivo_final = nom_archivo
+            if nom_archivo.upper().startswith('LE'):
+                periodo = download_params.get('perTributario', '')
+                if periodo:
+                    nom_archivo_final = re.sub(
+                        r'20\d{2}(?:0[1-9]|1[0-2])00', f"{periodo}00", nom_archivo
+                    )
+                    if nom_archivo_final != nom_archivo:
+                        self.logger.info(
+                            f"Nombre ajustado al periodo: '{nom_archivo}' -> '{nom_archivo_final}'"
+                        )
+
+            file_path = os.path.join(config.DOWNLOAD_PATH, nom_archivo_final)
             with open(file_path, 'wb') as f:
                 f.write(response.content)
-            self.logger.info(f"Archivo SIRE descargado: {file_path}")
+
+            self.logger.info(
+                f"Archivo SIRE descargado: {file_path} | "
+                f"Content-Type: {content_type} | "
+                f"Tamaño: {content_size} bytes"
+            )
             return file_path
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Error descargando archivo SIRE: {e}")
