@@ -15,7 +15,7 @@ from api.schemas import DescargarRequest, DescargarResponse
 from core.database import get_session_sync
 from models.otras_credenciales import OtraCredencial
 from models.operaciones import SireOperacion, EstadoOperacion
-from workers.sire_tasks import task_procesar_descarga_sire
+from workers.sire_tasks import task_solicitar_descarga_sire
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ def descargar_propuesta(
     )
 
     # ---- Paso 3: Encolar tarea en Celery ----
-    task_procesar_descarga_sire.delay(
+    task_solicitar_descarga_sire.delay(
         ruc=int(request.ruc),
         periodo=request.periodo,
         tipo=request.tipo,
