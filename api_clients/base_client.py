@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 import httpx
-import redis.asyncio as aioredis
+import redis
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -28,20 +28,21 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Redis connection pool (singleton)
+# Conexión Redis síncrona (funciona tanto en FastAPI como en Celery workers)
 # ---------------------------------------------------------------------------
-_redis_pool: Optional[aioredis.Redis] = None
+_redis_client: Optional[redis.Redis] = None
 
 
-async def get_redis() -> aioredis.Redis:
-    """Obtiene conexión Redis (pool global)."""
-    global _redis_pool
-    if _redis_pool is None:
-        _redis_pool = aioredis.from_url(
+def _get_redis() -> redis.Redis:
+    """Obtiene conexión Redis síncrona (singleton)."""
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis.from_url(
             settings.REDIS_URL,
             decode_responses=True,
+            socket_connect_timeout=3,
         )
-    return _redis_pool
+    return _redis_client
 
 
 # ---------------------------------------------------------------------------
@@ -112,36 +113,36 @@ class BaseSunatAPIClient(ABC):
         if self._client:
             await self._client.aclose()
 
-    # ---- token management -------------------------------------------------
+    # ---- token management (síncrono, compatible con Celery workers) -------
 
-    async def _get_cached_token(self) -> Optional[str]:
-        """Obtiene token desde Redis cache."""
-        redis = await get_redis()
-        return await redis.get(f"sire:token:{self.ruc}")
+    def _get_cached_token(self) -> Optional[str]:
+        """Obtiene token desde Redis cache (síncrono)."""
+        r = _get_redis()
+        return r.get(f"sire:token:{self.ruc}")
 
-    async def _set_cached_token(self, token: str):
-        """Guarda token en Redis con TTL."""
-        redis = await get_redis()
-        await redis.setex(
+    def _set_cached_token(self, token: str):
+        """Guarda token en Redis con TTL (síncrono)."""
+        r = _get_redis()
+        r.setex(
             f"sire:token:{self.ruc}",
             settings.SUNAT_TOKEN_EXPIRY,
             token,
         )
 
-    async def _invalidate_cached_token(self):
-        """Invalida token en caché (ej: tras un 401)."""
-        redis = await get_redis()
-        await redis.delete(f"sire:token:{self.ruc}")
+    def _invalidate_cached_token(self):
+        """Invalida token en caché (síncrono)."""
+        r = _get_redis()
+        r.delete(f"sire:token:{self.ruc}")
 
     async def _ensure_token(self):
         """Asegura que tenemos un token válido, usando caché Redis si es posible."""
-        cached = await self._get_cached_token()
+        cached = self._get_cached_token()
         if cached:
             self._access_token = cached
             logger.debug("Token obtenido desde Redis cache para RUC %s", self.ruc)
         else:
             self._access_token = await self._authenticate()
-            await self._set_cached_token(self._access_token)
+            self._set_cached_token(self._access_token)
             logger.debug("Token generado y cacheado en Redis para RUC %s", self.ruc)
 
     @abstractmethod
@@ -185,9 +186,9 @@ class BaseSunatAPIClient(ABC):
             logger.warning(
                 "Token expirado para RUC %s. Refrescando...", self.ruc
             )
-            await self._invalidate_cached_token()
+            self._invalidate_cached_token()
             self._access_token = await self._authenticate()
-            await self._set_cached_token(self._access_token)
+            self._set_cached_token(self._access_token)
             headers["Authorization"] = f"Bearer {self._access_token}"
             response = await self._client.request(
                 method, endpoint, headers=headers, **kwargs
