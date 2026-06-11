@@ -10,11 +10,15 @@ class TicketStatus(BaseModel):
     """
     Estado de un ticket de descarga consultado en SUNAT.
 
-    - Si estado es 'SIN_DATOS', el reporte se generó pero está vacío.
-    - parametros_descarga solo está presente cuando estado == 'COMPLETADO'.
+    Los códigos de estado reales de SUNAT son:
+    - "01", "02", "03", "05": En proceso
+    - "06": Terminado (listo para descargar)
+    - "04": Error
     """
     ticket: str
-    estado: str  # PENDIENTE, PROCESANDO, COMPLETADO, SIN_DATOS, ERROR
+    cod_estado: str         # Código real de SUNAT: "01"-"06", "04"=error
+    des_estado: str         # Descripción del estado
+    status: str             # Normalizado: "PROCESANDO", "LISTO", "ERROR", "SIN_DATOS"
     mensaje: Optional[str] = None
     parametros_descarga: Optional[dict] = None
 
@@ -30,3 +34,4 @@ class DownloadResponse(BaseModel):
     contenido: Optional[bytes] = None
     es_vacio: bool = False
     mensaje: Optional[str] = None
+    nom_archivo: Optional[str] = None

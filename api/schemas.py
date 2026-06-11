@@ -18,7 +18,7 @@ class DescargarRequest(BaseModel):
     Attributes:
         ruc: RUC del contribuyente (11 dígitos numéricos).
         periodo: Período en formato AAAAMM (ej: "202501").
-        tipo: Tipo de propuesta (ej: "REMITENTE", "TRANSPORTISTA").
+        tipo: Tipo de libro ("ventas" o "compras").
         webhook_url: URL del orquestador para recibir la notificación.
     """
     ruc: str = Field(
@@ -33,8 +33,8 @@ class DescargarRequest(BaseModel):
     )
     tipo: str = Field(
         ...,
-        description="Tipo de propuesta (ej: REMITENTE, TRANSPORTISTA)",
-        examples=["REMITENTE"],
+        description='Tipo de libro: "ventas" o "compras"',
+        examples=["ventas"],
     )
     webhook_url: Optional[str] = Field(
         None,
@@ -70,10 +70,13 @@ class DescargarRequest(BaseModel):
     @field_validator("tipo")
     @classmethod
     def validar_tipo(cls, v: str) -> str:
-        """Valida que el tipo no esté vacío."""
+        """Valida que el tipo sea 'ventas' o 'compras'."""
         if not v or not v.strip():
             raise ValueError("Tipo no puede estar vacío")
-        return v.strip().upper()
+        tipo = v.strip().lower()
+        if tipo not in ("ventas", "compras"):
+            raise ValueError("Tipo debe ser 'ventas' o 'compras'")
+        return tipo
 
 
 class DescargarResponse(BaseModel):

@@ -4,7 +4,7 @@ Tareas background de Celery para operaciones SIRE.
 Define la tarea principal `task_procesar_descarga_sire` que ejecuta
 el flujo completo de descarga de propuestas desde SUNAT:
 
-1. Obtiene credenciales SIRE del RUC desde la BD.
+1. Obtiene credenciales SIRE del RUC desde la BD (JOIN entre otras_cred + entities).
 2. Solicita la descarga a SUNAT.
 3. Hace polling cada 30s (máx 10 min) hasta que SUNAT completa el procesamiento.
 4. Descarga el archivo ZIP en memoria.
@@ -18,12 +18,12 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from celery import states
 from sqlalchemy import update
 
 from workers.celery_app import celery_app
 from core.database import get_session_sync
 from core.storage import S3StorageManager
+from models.entities import EntityCredencial
 from models.otras_credenciales import OtraCredencial
 from models.operaciones import SireOperacion, EstadoOperacion
 from api_clients.sire.client import SireClient
@@ -58,26 +58,12 @@ def task_procesar_descarga_sire(
     Args:
         ruc: Número RUC del contribuyente.
         periodo: Período en formato AAAAMM (ej: "202501").
-        tipo: Tipo de propuesta (ej: "REMITENTE", "TRANSPORTISTA").
+        tipo: Tipo de propuesta ("ventas" o "compras").
         webhook_url: URL del orquestador para notificar el resultado.
         operacion_id: ID de la operación en BD para actualizar estado.
 
     Returns:
         dict: Resultado de la operación con estado, ticket y s3_url.
-
-    Flujo:
-        1. Obtener credenciales SIRE del RUC.
-        2. Solicitar descarga a SUNAT → ticket.
-        3. Actualizar BD a PROCESSING con el ticket.
-        4. Polling cada 30s (máx 10 min) a consultar_estado_ticket.
-           • Si SIN_DATOS → BD a EMPTY, webhook y return.
-           • Si COMPLETADO → continúa.
-           • Si ERROR → raise.
-           • Si timeout → raise TimeoutError.
-        5. Descargar archivo en memoria.
-           • Si es_vacio → BD a EMPTY, webhook y return.
-        6. Subir a S3 → BD a S3_UPLOADED.
-        7. Enviar webhook → BD a WEBHOOK_SENT.
     """
     logger.info(
         "Iniciando task_procesar_descarga_sire: RUC=%s, periodo=%s, tipo=%s",
@@ -88,19 +74,15 @@ def task_procesar_descarga_sire(
     storage = S3StorageManager()
 
     try:
-        # ---- PASO 1: Obtener credenciales ----
-        cred = (
-            session.query(OtraCredencial)
-            .filter(
-                OtraCredencial.ruc == ruc,
-                OtraCredencial.tipo == "APISUNAT",
-                OtraCredencial.notas == "SIRE",
-            )
-            .first()
-        )
+        # ---- PASO 1: Obtener credenciales (JOIN entre ambas tablas) ----
+        cred = _obtener_credenciales(session, ruc)
 
         if not cred:
-            error_msg = f"No se encontraron credenciales SIRE para RUC {ruc}"
+            error_msg = (
+                f"No se encontraron credenciales SIRE completas para RUC {ruc}. "
+                "Verifique que existan registros en priv.otras_credenciales "
+                "(tipo='APISUNAT', notas='SIRE') y priv.entities (activo=TRUE)."
+            )
             logger.error(error_msg)
             _actualizar_estado(operacion_id, session, EstadoOperacion.ERROR, error_msg)
             return {"status": "error", "message": error_msg}
@@ -109,8 +91,10 @@ def task_procesar_descarga_sire(
         result = asyncio.run(
             _ejecutar_flujo_descarga(
                 ruc=str(ruc),
-                username=cred.usuario,
-                password=cred.contrasena,
+                client_id=cred["client_id"],
+                client_secret=cred["client_secret"],
+                user_sol=cred["user_sol"],
+                clave_sol=cred["clave_sol"],
                 periodo=periodo,
                 tipo=tipo,
                 operacion_id=operacion_id,
@@ -135,10 +119,58 @@ def task_procesar_descarga_sire(
         session.close()
 
 
+def _obtener_credenciales(session, ruc: int) -> Optional[dict]:
+    """
+    Obtiene las 4 credenciales necesarias para SIRE.
+
+    Hace un JOIN entre:
+    - priv.otras_credenciales (oc) → client_id, client_secret
+    - priv.entities (e) → user_sol, clave_sol
+    """
+    # Buscar credenciales de API (otras_credenciales)
+    oc = (
+        session.query(OtraCredencial)
+        .filter(
+            OtraCredencial.ruc == ruc,
+            OtraCredencial.tipo == "APISUNAT",
+            OtraCredencial.notas == "SIRE",
+        )
+        .first()
+    )
+
+    if not oc:
+        return None
+
+    # Buscar credenciales SOL (entities)
+    ent = (
+        session.query(EntityCredencial)
+        .filter(
+            EntityCredencial.ruc == ruc,
+        )
+        .first()
+    )
+
+    if not ent or not ent.usuario_sol or not ent.clave_sol:
+        logger.warning(
+            "RUC %s: credenciales SOL no encontradas en priv.entities "
+            "(usuario_sol o clave_sol vacíos)", ruc
+        )
+        return None
+
+    return {
+        "client_id": oc.usuario,
+        "client_secret": oc.contrasena,
+        "user_sol": ent.usuario_sol,
+        "clave_sol": ent.clave_sol,
+    }
+
+
 async def _ejecutar_flujo_descarga(
     ruc: str,
-    username: str,
-    password: str,
+    client_id: str,
+    client_secret: str,
+    user_sol: str,
+    clave_sol: str,
     periodo: str,
     tipo: str,
     operacion_id: Optional[int],
@@ -148,11 +180,14 @@ async def _ejecutar_flujo_descarga(
 ) -> dict:
     """
     Ejecuta el flujo completo de descarga SIRE de forma asíncrona.
-
-    Abre un SireClient con las credenciales inyectadas y orquesta
-    la solicitud, polling, descarga, subida a S3 y webhook.
     """
-    async with SireClient(ruc=ruc, username=username, password=password) as client:
+    async with SireClient(
+        ruc=ruc,
+        client_id=client_id,
+        client_secret=client_secret,
+        user_sol=user_sol,
+        clave_sol=clave_sol,
+    ) as client:
 
         # ---- PASO 2 y 3: Solicitar descarga y actualizar BD ----
         ticket = await client.solicitar_descarga_propuesta(periodo, tipo)
@@ -167,9 +202,9 @@ async def _ejecutar_flujo_descarga(
         )
 
         # ---- PASO 4: Polling de estado ----
-        estado_ticket = await _polling_estado_ticket(client, ticket)
+        estado_ticket = await _polling_estado_ticket(client, ticket, periodo)
 
-        if estado_ticket.estado == "SIN_DATOS":
+        if estado_ticket.status == "SIN_DATOS":
             _actualizar_estado(
                 operacion_id,
                 session,
@@ -185,6 +220,14 @@ async def _ejecutar_flujo_descarga(
                 s3_url=None,
             )
             return {"status": "empty", "ticket": ticket}
+
+        # Si el estado no es LISTO, es un error
+        if estado_ticket.status != "LISTO":
+            error_msg = (
+                f"Ticket {ticket} finalizó con estado inesperado: "
+                f"{estado_ticket.status} - {estado_ticket.mensaje}"
+            )
+            raise Exception(error_msg)
 
         # ---- PASO 5: Descargar archivo ----
         download = await client.descargar_archivo(estado_ticket.parametros_descarga)
@@ -208,19 +251,21 @@ async def _ejecutar_flujo_descarga(
 
         # ---- PASO 6: Subir a S3 ----
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        nom_archivo = download.nom_archivo or f"{periodo}_{tipo}_{ticket}.zip"
         s3_key = f"sire/descargas/{ruc}/{periodo}_{tipo}_{ticket}_{timestamp}.zip"
         s3_url = storage.upload_file_bytes(download.contenido, s3_key)
 
         logger.info(
-            "Archivo subido a S3: %s (tamaño: %d bytes)",
+            "Archivo subido a S3: %s (tamaño: %d bytes, nombre original: %s)",
             s3_url,
             len(download.contenido),
+            nom_archivo,
         )
         _actualizar_estado(
             operacion_id,
             session,
             EstadoOperacion.S3_UPLOADED,
-            log=f"Subido a S3: {s3_url}",
+            log=f"Subido a S3: {s3_url} (archivo: {nom_archivo})",
             s3_url=s3_url,
         )
 
@@ -245,44 +290,40 @@ async def _ejecutar_flujo_descarga(
             "status": "success",
             "ticket": ticket,
             "s3_url": s3_url,
+            "nom_archivo": nom_archivo,
         }
 
 
-async def _polling_estado_ticket(client: SireClient, ticket: str):
+async def _polling_estado_ticket(
+    client: SireClient, ticket: str, periodo: str
+):
     """
     Realiza polling al estado del ticket cada POLL_INTERVAL segundos,
     hasta un máximo de MAX_POLL_ATTEMPTS intentos.
-
-    Returns:
-        TicketStatus con estado final.
-
-    Raises:
-        TimeoutError: Si se supera el tiempo máximo de espera.
-        Exception: Si SUNAT reporta error en el ticket.
     """
     for intento in range(1, MAX_POLL_ATTEMPTS + 1):
         await asyncio.sleep(POLL_INTERVAL)
 
-        estado = await client.consultar_estado_ticket(ticket)
-        logger.debug(
-            "Polling ticket %s: intento %d/%d, estado=%s",
+        estado = await client.consultar_estado_ticket(ticket, periodo)
+        logger.info(
+            "Polling ticket %s: intento %d/%d, status=%s (cod=%s)",
             ticket,
             intento,
             MAX_POLL_ATTEMPTS,
-            estado.estado,
+            estado.status,
+            estado.cod_estado,
         )
 
-        if estado.estado in ("COMPLETADO", "SIN_DATOS"):
+        if estado.status in ("LISTO", "SIN_DATOS"):
             return estado
 
-        if estado.estado == "ERROR":
+        if estado.status == "ERROR":
             raise Exception(
                 f"SUNAT reportó error en ticket {ticket}: {estado.mensaje}"
             )
 
-        # Estados intermedios: PENDIENTE, PROCESANDO → seguir esperando
+        # Estados intermedios: PROCESANDO → seguir esperando
 
-    # Se agotaron los intentos
     raise TimeoutError(
         f"Ticket {ticket} no se completó en {MAX_WAIT_SECONDS}s "
         f"({MAX_POLL_ATTEMPTS} intentos)"
@@ -324,17 +365,7 @@ def _enviar_webhook(
     estado: str,
     s3_url: Optional[str],
 ):
-    """
-    Envía una notificación al orquestador vía webhook.
-
-    Args:
-        webhook_url: URL del endpoint del orquestador.
-        ruc: RUC del contribuyente.
-        periodo: Período procesado.
-        tipo: Tipo de propuesta.
-        estado: Estado final (COMPLETED, EMPTY, ERROR).
-        s3_url: URL del archivo en S3 (None si es EMPTY o ERROR).
-    """
+    """Envía una notificación al orquestador vía webhook."""
     if not webhook_url:
         logger.warning("Webhook no enviado: URL vacía")
         return
@@ -359,5 +390,3 @@ def _enviar_webhook(
         )
     except Exception as e:
         logger.error("Error al enviar webhook a %s: %s", webhook_url, e)
-        # No relanzamos la excepción: el webhook no debe bloquear
-        # el flujo principal. La BD ya tiene el estado S3_UPLOADED.
