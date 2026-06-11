@@ -287,8 +287,6 @@ class SireClient(BaseSunatAPIClient):
             nom_archivo = archivo_info.get("nomArchivoReporte", "")
 
             # Detectar reporte vacío (por nombre o metadata)
-            # Los reportes vacíos suelen tener nombres específicos
-            # o tamaño 0
             es_vacio = (
                 "sin datos" in nom_archivo.lower()
                 or "vacio" in nom_archivo.lower()
@@ -456,8 +454,8 @@ class SireClient(BaseSunatAPIClient):
 
         Dos patrones:
         1. Ventas (archivos LE): LE_AAAAMMDDHHMMSS... → LE_{periodo}00...
-        2. Compras (RUC-fecha-código-propuesta): RRRRRRRRRRR-AAAAMMDD-CODIGO6-propuesta
-           → RRRRRRRRRRR-AAAAMMDD-{periodo}-propuesta
+        2. Compras (RUC-fecha-código-propuesta):
+           RRRRRRRRRRR-AAAAMMDD-CODIGO6-propuesta → RRRRRRRRRRR-AAAAMMDD-{periodo}-propuesta
 
         Args:
             nombre_original: Nombre del archivo devuelto por SUNAT.
@@ -472,7 +470,32 @@ class SireClient(BaseSunatAPIClient):
         nombre = nombre_original
 
         # Patrón 1: Archivos LE de ventas (LE_AAAAMMDDHHMMSS...)
-        # Busca LE_ seguido de 8 dígitos (fecha) y reemplaza la fecha
+        # Busca LE_ seguido de 8 dígitos (fecha) y reemplaza la fecha por periodo+00
+        nombre = re.sub(
+            r"(LE_)20\d{2}(?:0[1-9]|1[0-2])[0-3]\d",
+            f"\\g<1>{periodo}00",
+            nombre,
+        )
+
+        # Patrón 2: Archivos de compras (RUC-AAAAMMDD-CODIGO6-propuesta)
+        # Busca 11díg-8díg-6díg-propuesta y reemplaza los 6 dígitos por el periodo
+        nombre = re.sub(
+            r"(\d{11}-\d{8}-)\d{6}(-propuesta)",
+            f"\\g<1>{periodo}\\g<2>",
+            nombre,
+        )
+
+        return nombre
+
+    # ------------------------------------------------------------------
+    # Skeletons (cascarones para implementar después)
+    # ------------------------------------------------------------------
+
+    async def aceptar_propuesta(self, periodo: str, tipo: str) -> str:
+        """Acepta la propuesta de SUNAT."""
+        raise NotImplementedError("aceptar_propuesta no implementado aún")
+
+    async def reemplazar_propuesta(
         self, periodo: str, tipo: str, file_bytes: bytes
     ) -> str:
         """Reemplaza la propuesta subiendo un archivo."""
