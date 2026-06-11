@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------------------
+# docker-compose.yml para el microservicio driver_sunat
+# ---------------------------------------------------------------------------
+# Define tres servicios:
+#   redis     - Broker de Celery (Alpine, ligero)
+#   api       - FastAPI (Uvicorn)
+#   celery    - Worker de Celery
+# ---------------------------------------------------------------------------
+
+version: "3.9"
+
+services:
+  # ------------------------------------------------------------------
+  # Redis - Broker de mensajería para Celery
+  # ------------------------------------------------------------------
+  redis:
+    image: redis:alpine
+    container_name: driver_sunat_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ------------------------------------------------------------------
+  # API - FastAPI (Uvicorn)
+  # ------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: driver_sunat_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379/0
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL}
+      - ORCHESTRATOR_WEBHOOK_URL=${ORCHESTRATOR_WEBHOOK_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ------------------------------------------------------------------
+  # Celery Worker - Procesamiento background
+  # ------------------------------------------------------------------
+  celery:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: driver_sunat_celery
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379/0
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL}
+      - ORCHESTRATOR_WEBHOOK_URL=${ORCHESTRATOR_WEBHOOK_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A workers.celery_app worker --loglevel=info
+      
+volumes:
+  redis_data:
