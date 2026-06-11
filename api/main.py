@@ -15,6 +15,7 @@ from api.routes.sire import router as sire_router
 from api.schemas import HealthResponse
 from core.config import settings
 from core.database import SessionSync
+from core.init_db import init_database
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,11 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# ---------------------------------------------------------------------------
+# Inicialización de la base de datos al arrancar
+# ---------------------------------------------------------------------------
+init_database()
 
 # ---------------------------------------------------------------------------
 # Inclusión de routers

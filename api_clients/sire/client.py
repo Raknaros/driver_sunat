@@ -450,12 +450,14 @@ class SireClient(BaseSunatAPIClient):
     def _renombrar_archivo(nombre_original: str, periodo: str) -> str:
         """
         Ajusta el nombre del archivo descargado reemplazando timestamps
-        de SUNAT por el período tributario real.
+        de SUNAT por el período tributario real, preservando la estructura
+        original del nombre.
 
-        Dos patrones:
-        1. Ventas (archivos LE): LE_AAAAMMDDHHMMSS... → LE_{periodo}00...
-        2. Compras (RUC-fecha-código-propuesta):
-           RRRRRRRRRRR-AAAAMMDD-CODIGO6-propuesta → RRRRRRRRRRR-AAAAMMDD-{periodo}-propuesta
+        Patrones:
+        1. Ventas: LE{RUC}{AAAAMMDD}{codigos}... → LE{RUC}{periodo}00{codigos}...
+           Ej: LE1041883975420260100014040001EXP2 → LE1041883975420260400014040001EXP2
+        2. Compras: {RUC}-{AAAAMMDD}-{codigo}-propuesta → {RUC}-{AAAAMMDD}-{periodo}-propuesta
+           Ej: 20606283858-20260430-181929-propuesta → 20606283858-20260430-202604-propuesta
 
         Args:
             nombre_original: Nombre del archivo devuelto por SUNAT.
@@ -469,16 +471,17 @@ class SireClient(BaseSunatAPIClient):
 
         nombre = nombre_original
 
-        # Patrón 1: Archivos LE de ventas (LE_AAAAMMDDHHMMSS...)
-        # Busca LE_ seguido de 8 dígitos (fecha) y reemplaza la fecha por periodo+00
+        # Patrón 1: Ventas - archivos que empiezan con LE seguidas de RUC (11 dígitos)
+        # y luego una fecha de 8 dígitos AAAAMMDD
+        # Busca: LE{RUC}{8dígitos}... y reemplaza los 8 dígitos por {periodo}00
         nombre = re.sub(
-            r"(LE_)20\d{2}(?:0[1-9]|1[0-2])[0-3]\d",
+            r"^(LE\d{11})\d{8}",
             f"\\g<1>{periodo}00",
             nombre,
         )
 
-        # Patrón 2: Archivos de compras (RUC-AAAAMMDD-CODIGO6-propuesta)
-        # Busca 11díg-8díg-6díg-propuesta y reemplaza los 6 dígitos por el periodo
+        # Patrón 2: Compras - archivos en formato {RUC}-{AAAAMMDD}-{CODIGO6}-propuesta
+        # Reemplaza los 6 dígitos (código) por el periodo AAAAMM
         nombre = re.sub(
             r"(\d{11}-\d{8}-)\d{6}(-propuesta)",
             f"\\g<1>{periodo}\\g<2>",

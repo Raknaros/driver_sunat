@@ -71,9 +71,10 @@ def task_procesar_descarga_sire(
     )
 
     session = next(get_session_sync())
-    storage = S3StorageManager()
 
     try:
+        storage = S3StorageManager()
+
         # ---- PASO 1: Obtener credenciales (JOIN entre ambas tablas) ----
         cred = _obtener_credenciales(session, ruc)
 
@@ -250,9 +251,8 @@ async def _ejecutar_flujo_descarga(
             return {"status": "empty", "ticket": ticket}
 
         # ---- PASO 6: Subir a S3 ----
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         nom_archivo = download.nom_archivo or f"{periodo}_{tipo}_{ticket}.zip"
-        s3_key = f"sire/descargas/{ruc}/{periodo}_{tipo}_{ticket}_{timestamp}.zip"
+        s3_key = f"unparsin/{nom_archivo}"
         s3_url = storage.upload_file_bytes(download.contenido, s3_key)
 
         logger.info(
