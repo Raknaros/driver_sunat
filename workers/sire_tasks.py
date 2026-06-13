@@ -324,7 +324,7 @@ async def _ejecutar_consulta_descarga(
 
         # ---- Subir a S3 ----
         nom_archivo = download.nom_archivo or f"{periodo}_{tipo}_{ticket}.zip"
-        s3_key = f"unparsin/{nom_archivo}"
+        s3_key = f"unparsed/{nom_archivo}"
         s3_url = storage.upload_file_bytes(download.contenido, s3_key)
 
         logger.info(
